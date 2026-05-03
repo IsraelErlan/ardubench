@@ -4,12 +4,12 @@ import struct
 from typing import Dict
 
 MSG_HEADER = bytes([0xA3, 0x95])
-FMT_MSG_ID = 0x80          # 128
+FMT_TYPE_ID = 0x80          # 128 — the message type that defines other types
 FMT_TOTAL_LEN = 89
 FMT_PAYLOAD_LEN = FMT_TOTAL_LEN - 3   # 86 bytes after the 3-byte header
 
-# Maps ArduPilot format characters to Python struct format characters.
-AP_TO_STRUCT: Dict[str, str] = {
+# Maps each ArduPilot format character to its Python struct equivalent.
+FORMAT_TO_STRUCT: Dict[str, str] = {
     'b': 'b', 'B': 'B',
     'h': 'h', 'H': 'H',
     'i': 'i', 'I': 'I',
@@ -22,16 +22,16 @@ AP_TO_STRUCT: Dict[str, str] = {
     'n': '4s', 'N': '16s', 'Z': '64s',
 }
 
-# Scaling divisors for ArduPilot format characters that store a real value
-# as a multiplied integer (same convention pymavlink uses).
-AP_SCALE: Dict[str, float] = {
-    'c': 1e-2,   # int16 × 100  → divide by 100
-    'C': 1e-2,   # uint16 × 100 → divide by 100
-    'e': 1e-2,   # int32 × 100  → divide by 100
-    'E': 1e-2,   # uint32 × 100 → divide by 100
-    'L': 1e-7,   # int32 lat/lon in degrees × 1e7 → divide by 1e7
+# Scaling divisors for format characters that store a real value as a
+# multiplied integer (e.g. Lat stored as degrees × 1e7).
+FORMAT_SCALE: Dict[str, float] = {
+    'c': 1e-2,   # int16  × 100  → real value
+    'C': 1e-2,   # uint16 × 100  → real value
+    'e': 1e-2,   # int32  × 100  → real value
+    'E': 1e-2,   # uint32 × 100  → real value
+    'L': 1e-7,   # int32 lat/lon in degrees × 1e7 → decimal degrees
 }
 
-# FMT payload layout:
-#   defined_id (uint8) | length (uint8) | name (4s) | format (16s) | labels (64s)
-FMT_STRUCT = struct.Struct('<BB4s16s64s')
+# Struct used to unpack a raw FMT payload:
+#   type_id (uint8) | length (uint8) | name (4s) | format_chars (16s) | labels (64s)
+FMT_PAYLOAD_STRUCT = struct.Struct('<BB4s16s64s')

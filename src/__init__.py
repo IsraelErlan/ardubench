@@ -1,5 +1,4 @@
 from format_manager import FormatManager
-from full_log_parser import FullLogParser
-from selective_parser import SelectiveParser
+from log_parser import LogParser
 
-__all__ = ['FormatManager', 'FullLogParser', 'SelectiveParser']
+__all__ = ['FormatManager', 'LogParser']
