@@ -23,13 +23,13 @@ FORMAT_TO_STRUCT: Dict[str, str] = {
 }
 
 # Scaling divisors for format characters that store a real value as a
-# multiplied integer (e.g. Lat stored as degrees × 1e7).
+# multiplied integer (e.g. Lat stored as degrees x 1e7).
 FORMAT_SCALE: Dict[str, float] = {
-    'c': 1e-2,   # int16  × 100  → real value
-    'C': 1e-2,   # uint16 × 100  → real value
-    'e': 1e-2,   # int32  × 100  → real value
-    'E': 1e-2,   # uint32 × 100  → real value
-    'L': 1e-7,   # int32 lat/lon in degrees × 1e7 → decimal degrees
+    'c': 1e-2,
+    'C': 1e-2,
+    'e': 1e-2,
+    'E': 1e-2,
+    'L': 1e-7,
 }
 
 # Struct used to unpack a raw FMT payload:
