@@ -4,14 +4,14 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))  # src/
+sys.path.insert(0, str(Path(__file__).parent))  # src/
 
 from dotenv import load_dotenv
 
 from business_logic.format_manager import FormatManager
 from business_logic.log_parser import LogParser
 
-load_dotenv(Path(__file__).parent.parent.parent / '.env')
+load_dotenv(Path(__file__).parent.parent / '.env')
 PATH = os.environ['LOG_FILE_PATH']
 
 MULTI_TARGETS = ['GPS', 'ATT', 'IMU', 'BARO', 'RCIN']
