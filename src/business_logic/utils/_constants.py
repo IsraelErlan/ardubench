@@ -3,7 +3,9 @@
 import struct
 from typing import Dict
 
-MSG_HEADER = bytes([0xA3, 0x95])
+MSG_HEADER_B0: int = 0xA3
+MSG_HEADER_B1: int = 0x95
+MSG_HEADER = bytes([MSG_HEADER_B0, MSG_HEADER_B1])
 FMT_TYPE_ID = 0x80          # 128 — the message type that defines other types
 FMT_TOTAL_LEN = 89
 FMT_PAYLOAD_LEN = FMT_TOTAL_LEN - 3   # 86 bytes after the 3-byte header
