@@ -30,17 +30,18 @@ class SequentialParser:
 
     def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
-
-        target_ids = _names_to_type_ids(self._fmt, names)
-        if target_ids is not None and not target_ids:
-            _log.warning('parse: no matching type for names=%r', names)
-            return []
-
         messages: List[Dict[str, Any]] = []
 
         try:
             with open(self._fmt.file_path, 'rb') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+                    self._fmt.load(buffer)
+
+                    target_ids = _names_to_type_ids(self._fmt, names)
+                    if target_ids is not None and not target_ids:
+                        _log.warning('parse: no matching type for names=%r', names)
+                        return []
+
                     offset = self._fmt.data_start_offset
                     scan_end = len(buffer)
 

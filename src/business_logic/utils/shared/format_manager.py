@@ -1,6 +1,5 @@
 """Shared FormatManager for all ArduPilot .bin log parsers."""
 
-import mmap
 import struct
 import sys
 from pathlib import Path
@@ -21,7 +20,10 @@ _log = get_logger(__name__)
 
 
 class FormatManager:
-    """Scans the .bin file for FMT records and exposes per-type decode metadata.
+    """Exposes per-type decode metadata for ArduPilot .bin log files.
+
+    Does not open the file itself. Call load(buffer) once the caller has
+    opened the file, so the file handle can be shared with the parser.
 
     Includes pickle support (__getstate__/__setstate__) so instances can be
     sent to worker processes via ProcessPoolExecutor.
@@ -34,7 +36,6 @@ class FormatManager:
         self.data_start_offset: int = 0
         self._registry: Dict[int, Dict[str, Any]] = {}
         self._name_to_id: Dict[str, int] = {}
-        self._load_format_records()
 
     # ------------------------------------------------------------------
     # Pickle support (struct.Struct is not picklable in Python 3.14+)
@@ -57,6 +58,38 @@ class FormatManager:
     # Public API
     # ------------------------------------------------------------------
 
+    def load(self, buffer) -> None:
+        """Scan FMT records from an already-open mmap buffer."""
+        self.data_start_offset = 0
+        self._registry.clear()
+        self._name_to_id.clear()
+        try:
+            offset, scan_end = 0, len(buffer)
+            first_data: Optional[int] = None
+            while offset + 3 <= scan_end:
+                if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
+                    raise ValueError(f'invalid header at offset {offset}')
+                type_id = buffer[offset + 2]
+                offset += 3
+                if type_id == FMT_TYPE_ID:
+                    if offset + FMT_PAYLOAD_LEN > scan_end:
+                        raise ValueError(f'truncated FMT record at offset {offset}')
+                    self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
+                    offset += FMT_PAYLOAD_LEN
+                else:
+                    if first_data is None:
+                        first_data = offset - 3
+                    length = self.get_length(type_id)
+                    if length is None:
+                        raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                    offset += length - 3
+            self.data_start_offset = first_data or 0
+            _log.info('loaded %s  [%d types, data offset: %d]',
+                      Path(self.file_path).name, len(self._registry), self.data_start_offset)
+        except Exception as error:
+            _log.error('failed to load FMT records from %s: %s', Path(self.file_path).name, error)
+            raise
+
     def get_id(self, name: str) -> Optional[int]:
         return self._name_to_id.get(name.upper())
 
@@ -77,36 +110,6 @@ class FormatManager:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _load_format_records(self) -> None:
-        try:
-            with open(self.file_path, 'rb') as file:
-                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
-                    offset, scan_end = 0, len(buffer)
-                    first_data: Optional[int] = None
-                    while offset + 3 <= scan_end:
-                        if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                            raise ValueError(f'invalid header at offset {offset}')
-                        type_id = buffer[offset + 2]
-                        offset += 3
-                        if type_id == FMT_TYPE_ID:
-                            if offset + FMT_PAYLOAD_LEN > scan_end:
-                                raise ValueError(f'truncated FMT record at offset {offset}')
-                            self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
-                            offset += FMT_PAYLOAD_LEN
-                        else:
-                            if first_data is None:
-                                first_data = offset - 3
-                            length = self.get_length(type_id)
-                            if length is None:
-                                raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
-                            offset += length - 3
-            self.data_start_offset = first_data or 0
-            _log.info('loaded %s  [%d types, data offset: %d]',
-                      Path(self.file_path).name, len(self._registry), self.data_start_offset)
-        except Exception as error:
-            _log.error('failed to load FMT records from %s: %s', Path(self.file_path).name, error)
-            raise
 
     def _register_type(self, unpacked: tuple) -> None:
         type_id, total_length, name_raw, fmt_raw, labels_raw = unpacked

@@ -1,4 +1,5 @@
-﻿import asyncio
+import asyncio
+import mmap
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Union
@@ -35,11 +36,17 @@ class AsyncParser:
     async def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
         try:
-            target_ids = _names_to_type_ids(self._fmt, names)
-            if target_ids is not None and not target_ids:
-                _log.warning('parse: no matching type for names=%r', names)
-                return []
-            result = await asyncio.to_thread(sync_parse, self._fmt.file_path, self._fmt, target_ids)
+            with open(self._fmt.file_path, 'rb') as file:
+                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+                    self._fmt.load(buffer)
+
+                    target_ids = _names_to_type_ids(self._fmt, names)
+                    if target_ids is not None and not target_ids:
+                        _log.warning('parse: no matching type for names=%r', names)
+                        return []
+
+                    result = await asyncio.to_thread(sync_parse, buffer, self._fmt, target_ids)
+
             _log.info('parse(%r) -> %d messages', names, len(result))
             return result
         except Exception as error:

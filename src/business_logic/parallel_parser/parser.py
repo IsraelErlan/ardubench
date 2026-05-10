@@ -1,4 +1,4 @@
-﻿import mmap
+import mmap
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
@@ -39,18 +39,26 @@ class ParallelParser:
     def parse(self, names: Names = None, n_workers: Optional[int] = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
         try:
-            target_ids = _names_to_type_ids(self._fmt, names)
-            if target_ids is not None and not target_ids:
-                _log.warning('parse: no matching type for names=%r', names)
-                return []
-
             num_workers = n_workers or os.cpu_count() or 4
-            _log.debug('spawning %d worker processes', num_workers)
-            tasks = self._build_worker_tasks(num_workers, target_ids)
 
+            with open(self._fmt.file_path, 'rb') as file:
+                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+                    self._fmt.load(buf)
+
+                    target_ids = _names_to_type_ids(self._fmt, names)
+                    if target_ids is not None and not target_ids:
+                        _log.warning('parse: no matching type for names=%r', names)
+                        return []
+
+                    splits = self._compute_byte_range_splits(num_workers, buf)
+
+            _log.debug('spawning %d worker processes', num_workers)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = [executor.submit(parse_chunk, *task) for task in tasks]
-                chunks = [future.result() for future in futures]
+                futures = [
+                    executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids)
+                    for i in range(num_workers)
+                ]
+                chunks = [f.result() for f in futures]
 
             result = [message for chunk in chunks for message in chunk]
             _log.info('parse(%r) -> %d messages', names, len(result))
@@ -59,24 +67,15 @@ class ParallelParser:
             _log.error('parse failed: %s', error)
             raise
 
-    def _build_worker_tasks(self, num_workers: int, target_ids: Optional[Set[int]]) -> List[tuple]:
-        splits = self._compute_byte_range_splits(num_workers)
-        return [
-            (self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids)
-            for i in range(num_workers)
-        ]
-
-    def _compute_byte_range_splits(self, num_workers: int) -> List[int]:
-        file_size = Path(self._fmt.file_path).stat().st_size
+    def _compute_byte_range_splits(self, num_workers: int, buffer) -> List[int]:
+        file_size = len(buffer)
         data_start = self._fmt.data_start_offset
         chunk_size = max(1, (file_size - data_start) // num_workers)
 
         splits = [data_start]
-        with open(self._fmt.file_path, 'rb') as file:
-            with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buf:
-                for i in range(1, num_workers):
-                    pos = _find_message_start(buf, data_start + i * chunk_size, self._fmt._registry)
-                    splits.append(pos if pos is not None else file_size)
+        for i in range(1, num_workers):
+            pos = _find_message_start(buffer, data_start + i * chunk_size, self._fmt._registry)
+            splits.append(pos if pos is not None else file_size)
         splits.append(file_size)
         return splits
 
