@@ -1,4 +1,4 @@
-# ArduPilot Binary Log Parser
+# ardubench
 
 A Python project for parsing ArduPilot `.bin` telemetry log files. Implements five independent parsing strategies — each a self-contained package — so you can compare their speed and choose the right one for your use case.
 
@@ -7,21 +7,24 @@ A Python project for parsing ArduPilot `.bin` telemetry log files. Implements fi
 ## Project Structure
 
 ```
-part-b/
+ardubench/
 ├── .env                        ← log file path (not committed)
 ├── .env.example
 ├── requirements.txt
+├── tests/
+│   └── test_parsers.py         ← pytest suite (34 tests)
 └── src/
     └── business_logic/
         ├── main.py             ← runs all parsers
         ├── utils/
         │   └── shared/
-        │       ├── _constants.py   ← binary protocol constants
-        │       └── logger.py       ← shared logger factory
+        │       ├── _constants.py       ← binary protocol constants
+        │       ├── format_manager.py   ← shared FMT scanner & decoder
+        │       └── logger.py           ← shared logger factory
         ├── sequential_parser/
         ├── parallel_parser/
         ├── threaded_parser/
-        ├── asyncio_parser/
+        ├── async_parser/
         └── mavlink_parser/
 ```
 
@@ -30,17 +33,18 @@ Each parser package contains:
 | File | Purpose |
 |---|---|
 | `__init__.py` | Exports the parser class |
-| `format_manager.py` | Scans FMT records, builds type registry, decodes messages |
 | `parser.py` | Orchestrates parsing using the chosen concurrency strategy |
-| `workers.py` | Worker function run in a thread/process (not in sequential) |
+| `workers.py` | Worker function run in a thread/process (not in sequential/mavlink) |
 | `main.py` | Standalone benchmark for this parser |
+
+`FormatManager` lives once in `utils/shared/` and is shared by all parsers.
 
 ---
 
 ## Parsers
 
 ### SequentialParser
-Single process, single thread. Reads the file from start to finish with `mmap`. The simplest implementation and the baseline for comparisons.
+Single process, single thread. Opens the file once with `mmap`, loads FMT records, then parses from `data_start_offset` to EOF. The simplest implementation and the baseline for comparisons.
 
 ```python
 from sequential_parser import SequentialParser
@@ -52,7 +56,7 @@ parser.parse(['GPS', 'ATT'])     # multiple types
 ```
 
 ### ParallelParser
-Splits the file into N equal chunks and decodes each chunk in a **separate process** using `ProcessPoolExecutor`. Fastest option for parsing all messages from large files.
+Opens the file once to load FMT records and compute N byte-range split points (using `mmap.find()`), then spawns N **separate processes** via `ProcessPoolExecutor` — each opens the file independently and decodes its chunk. Fastest option for parsing all messages from large files.
 
 ```python
 from parallel_parser import ParallelParser
@@ -63,7 +67,7 @@ parser.parse('GPS', n_workers=4) # override worker count
 ```
 
 ### ThreadedParser
-Same chunk-split strategy as `ParallelParser` but uses `ThreadPoolExecutor`. The GIL prevents true CPU parallelism, so speed is similar to sequential for CPU-bound work. Useful when I/O is the bottleneck (e.g. network-mounted storage).
+Same chunk-split strategy as `ParallelParser` but uses `ThreadPoolExecutor`. The GIL prevents true CPU parallelism, so speed is similar to sequential for CPU-bound work. Threads share the open `mmap` buffer — no per-thread file open needed.
 
 ```python
 from threaded_parser import ThreadedParser
@@ -74,10 +78,10 @@ parser.parse('GPS', n_threads=8)
 ```
 
 ### AsyncParser
-Runs the file scan inside `asyncio.to_thread`, so it never blocks the event loop. The right choice when the parser lives inside an async application (FastAPI, aiohttp, etc.).
+Opens the file once, loads FMT records, then runs the scan inside `asyncio.to_thread` passing the shared buffer — so it never blocks the event loop. The right choice when the parser lives inside an async application (FastAPI, aiohttp, etc.).
 
 ```python
-from asyncio_parser import AsyncParser
+from async_parser import AsyncParser
 
 parser = AsyncParser('flight.bin')
 
@@ -107,13 +111,13 @@ ArduPilot `.bin` files are a stream of binary messages. Every message starts wit
 [0xA3][0x95][type_id][...payload...]
 ```
 
-At the beginning of the file there are `FMT` messages (type `0x80`) that define the schema for every other message type:
+`FMT` messages (type `0x80`) define the schema for every other message type and can appear anywhere in the file:
 
 ```
 FMT: type_id=130  length=52  name="GPS"  format="QBILLeeEefIBB"  labels="TimeUS,Status,GMS,..."
 ```
 
-The `FormatManager` scans these `FMT` records first, builds a registry of pre-compiled `struct.Struct` objects, then uses that registry to decode every subsequent message in a single pass with `unpack_from` (no slice allocation).
+`FormatManager` performs a single full-file scan to collect all `FMT` records, builds a registry of pre-compiled `struct.Struct` objects, and sets `data_start_offset` to the first non-FMT message. Parsers then decode from that offset with `unpack_from` (no slice allocation).
 
 ---
 
@@ -123,14 +127,14 @@ Results on a ~400 MB log file (7.6 million messages):
 
 | Parser | `parse()` | `parse('GPS')` |
 |---|---|---|
-| SequentialParser | ~20s | ~1.8s |
-| ParallelParser | ~11s | ~1.6s |
-| ThreadedParser | ~20s | ~1.8s |
-| AsyncParser | ~20s | ~1.6s |
-| MavlinkParser | — | — |
+| SequentialParser | ~21s | ~3.2s |
+| ParallelParser | ~13s | ~2.9s |
+| ThreadedParser | ~22s | ~4.2s |
+| AsyncParser | ~20s | ~4.2s |
+| MavlinkParser | ~60s | — |
 
-> `ParallelParser` is fastest for all-messages because it distributes CPU work across real processes.
-> `ThreadedParser` matches sequential speed because the GIL prevents CPU parallelism.
+> `ParallelParser` is fastest for all-messages because it distributes CPU work across real processes, bypassing the GIL.
+> `ThreadedParser` matches sequential speed because the GIL prevents CPU parallelism for this CPU-bound workload.
 > `AsyncParser`'s advantage is non-blocking integration, not raw speed.
 
 ---
@@ -158,8 +162,13 @@ python src/business_logic/main.py
 python src/business_logic/sequential_parser/main.py
 python src/business_logic/parallel_parser/main.py
 python src/business_logic/threaded_parser/main.py
-python src/business_logic/asyncio_parser/main.py
+python src/business_logic/async_parser/main.py
 python src/business_logic/mavlink_parser/main.py
+```
+
+**5. Run the test suite**
+```bash
+pytest tests/
 ```
 
 ---
@@ -169,8 +178,8 @@ python src/business_logic/mavlink_parser/main.py
 All parsers log to `stderr` using Python's standard `logging` module. The default level is `INFO`.
 
 ```
-INFO     sequential_parser.format_manager: loaded flight.bin  [47 types, data offset: 4450]
-INFO     sequential_parser.parser: parse('GPS') → 102405 messages
+INFO     utils.shared.format_manager: loaded flight.bin  [180 types, data offset: 15575]
+INFO     sequential_parser.parser: parse('GPS') -> 102405 messages
 ```
 
 To enable debug logs (chunk-level details):
