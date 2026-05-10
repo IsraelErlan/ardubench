@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-from asyncio_parser import AsyncParser
+from async_parser import AsyncParser
 
 load_dotenv(Path(__file__).parents[3] / '.env')
 PATH = os.environ['LOG_FILE_PATH']

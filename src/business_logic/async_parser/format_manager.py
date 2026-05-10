@@ -30,7 +30,7 @@ class FormatManager:
         self._name_to_id: Dict[str, int] = {}
         self._load_format_records()
 
-    # Pickle support â€” needed when passed to ProcessPoolExecutor via run_in_executor
+    # Pickle support — needed when passed to ProcessPoolExecutor via run_in_executor
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state['_registry'] = {
@@ -62,30 +62,34 @@ class FormatManager:
         return self._build_message(type_entry, unpacked)
 
     def _load_format_records(self) -> None:
-        with open(self.file_path, 'rb') as file:
-            with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
-                offset, scan_end = 0, len(buffer)
-                first_data: Optional[int] = None
-                while offset + 3 <= scan_end:
-                    if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                        break
-                    type_id = buffer[offset + 2]
-                    offset += 3
-                    if type_id == FMT_TYPE_ID:
-                        if offset + FMT_PAYLOAD_LEN > scan_end:
-                            break
-                        self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
-                        offset += FMT_PAYLOAD_LEN
-                    else:
-                        if first_data is None:
-                            first_data = offset - 3
-                        length = self.get_length(type_id)
-                        if length is None:
-                            break
-                        offset += length - 3
-        self.data_start_offset = first_data or 0
-        _log.info('loaded %s  [%d types, data offset: %d]',
-                  Path(self.file_path).name, len(self._registry), self.data_start_offset)
+        try:
+            with open(self.file_path, 'rb') as file:
+                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+                    offset, scan_end = 0, len(buffer)
+                    first_data: Optional[int] = None
+                    while offset + 3 <= scan_end:
+                        if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
+                            raise ValueError(f'invalid header at offset {offset}')
+                        type_id = buffer[offset + 2]
+                        offset += 3
+                        if type_id == FMT_TYPE_ID:
+                            if offset + FMT_PAYLOAD_LEN > scan_end:
+                                raise ValueError(f'truncated FMT record at offset {offset}')
+                            self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
+                            offset += FMT_PAYLOAD_LEN
+                        else:
+                            if first_data is None:
+                                first_data = offset - 3
+                            length = self.get_length(type_id)
+                            if length is None:
+                                raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                            offset += length - 3
+            self.data_start_offset = first_data or 0
+            _log.info('loaded %s  [%d types, data offset: %d]',
+                      Path(self.file_path).name, len(self._registry), self.data_start_offset)
+        except Exception as error:
+            _log.error('failed to load FMT records from %s: %s', Path(self.file_path).name, error)
+            raise
 
     def _register_type(self, unpacked: tuple) -> None:
         type_id, total_length, name_raw, fmt_raw, labels_raw = unpacked
