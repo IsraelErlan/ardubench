@@ -8,7 +8,7 @@ _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from threaded_parser.format_manager import FormatManager
+from utils.shared.format_manager import FormatManager
 from threaded_parser.workers import parse_chunk
 from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1
 from utils.shared.logger import get_logger
@@ -37,22 +37,26 @@ class ThreadedParser:
 
     def parse(self, names: Names = None, n_threads: Optional[int] = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
-        target_ids = _names_to_type_ids(self._fmt, names)
-        if target_ids is not None and not target_ids:
-            _log.warning('parse: no matching type for names=%r', names)
-            return []
+        try:
+            target_ids = _names_to_type_ids(self._fmt, names)
+            if target_ids is not None and not target_ids:
+                _log.warning('parse: no matching type for names=%r', names)
+                return []
 
-        num_threads = n_threads or self._n_threads
-        _log.debug('spawning %d worker threads', num_threads)
-        tasks = self._build_worker_tasks(num_threads, target_ids)
+            num_threads = n_threads or self._n_threads
+            _log.debug('spawning %d worker threads', num_threads)
+            tasks = self._build_worker_tasks(num_threads, target_ids)
 
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(parse_chunk, *task) for task in tasks]
-            chunks = [future.result() for future in futures]
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = [executor.submit(parse_chunk, *task) for task in tasks]
+                chunks = [future.result() for future in futures]
 
-        result = [message for chunk in chunks for message in chunk]
-        _log.info('parse(%r) â†’ %d messages', names, len(result))
-        return result
+            result = [message for chunk in chunks for message in chunk]
+            _log.info('parse(%r) -> %d messages', names, len(result))
+            return result
+        except Exception as error:
+            _log.error('parse failed: %s', error)
+            raise
 
     def _build_worker_tasks(self, num_threads: int, target_ids: Optional[Set[int]]) -> List[tuple]:
         split_offsets = self._compute_chunk_offsets(num_threads)
@@ -71,11 +75,11 @@ class ThreadedParser:
 
                 while offset + 3 <= scan_end:
                     if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                        break
+                        raise ValueError(f'invalid header at offset {offset}')
                     type_id = buffer[offset + 2]
                     type_entry = registry.get(type_id)
                     if type_entry is None:
-                        break
+                        raise ValueError(f'unregistered type_id {type_id} at offset {offset}')
                     message_offsets.append(offset)
                     offset += type_entry['total_length']
 

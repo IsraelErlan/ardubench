@@ -7,7 +7,7 @@ _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from async_parser.format_manager import FormatManager
+from utils.shared.format_manager import FormatManager
 from async_parser.workers import sync_parse
 from utils.shared.logger import get_logger
 

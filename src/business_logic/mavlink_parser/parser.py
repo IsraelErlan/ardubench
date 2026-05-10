@@ -33,25 +33,25 @@ class MavlinkParser:
 
     def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
+        try:
+            mlog = mavutil.mavlink_connection(self.file_path, robust_parsing=True)
+            messages: List[Dict[str, Any]] = []
 
-        # type_filter = _resolve_type_filter(names)
+            while True:
+                msg = mlog.recv_msg()
+                if msg is None:
+                    break
+                if msg.get_type() == 'BAD_DATA':
+                    continue
+                row = msg.to_dict()
+                row['_msg_type'] = row.pop('mavpackettype', msg.get_type())
+                messages.append(row)
 
-        mlog = mavutil.mavlink_connection(self.file_path, robust_parsing=True)
-        messages: List[Dict[str, Any]] = []
-
-        while True:
-            # msg = mlog.recv_match(type=type_filter, blocking=False)
-            msg = mlog.recv_msg()
-            if msg is None:
-                break
-            if msg.get_type() == 'BAD_DATA':
-                continue
-            row = msg.to_dict()
-            row['_msg_type'] = row.pop('mavpackettype', msg.get_type())
-            messages.append(row)
-
-        _log.info('parse(%r) → %d messages', names, len(messages))
-        return messages
+            _log.info('parse(%r) -> %d messages', names, len(messages))
+            return messages
+        except Exception as error:
+            _log.error('parse failed: %s', error)
+            raise
 
 
 def _resolve_type_filter(names: Names) -> Optional[List[str]]:
