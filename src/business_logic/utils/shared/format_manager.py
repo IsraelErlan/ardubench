@@ -83,6 +83,7 @@ class FormatManager:
             with open(self.file_path, 'rb') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
                     offset, scan_end = 0, len(buffer)
+                    first_data: Optional[int] = None
                     while offset + 3 <= scan_end:
                         if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
                             raise ValueError(f'invalid header at offset {offset}')
@@ -94,8 +95,13 @@ class FormatManager:
                             self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
                             offset += FMT_PAYLOAD_LEN
                         else:
-                            self.data_start_offset = offset - 3
-                            break
+                            if first_data is None:
+                                first_data = offset - 3
+                            length = self.get_length(type_id)
+                            if length is None:
+                                raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                            offset += length - 3
+            self.data_start_offset = first_data or 0
             _log.info('loaded %s  [%d types, data offset: %d]',
                       Path(self.file_path).name, len(self._registry), self.data_start_offset)
         except Exception as error:
