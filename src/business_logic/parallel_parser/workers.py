@@ -14,7 +14,7 @@ _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1
+from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
@@ -43,7 +43,12 @@ def parse_chunk(
                     offset += 3
                     type_entry = registry.get(type_id)
                     if type_entry is None:
-                        raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                        _log.warning('skipping unknown type_id=%d at offset=%d', type_id, offset - 3)
+                        next_pos = buffer.find(MSG_HEADER, offset)
+                        if next_pos == -1:
+                            break
+                        offset = next_pos
+                        continue
                     payload_len = type_entry['total_length'] - 3
                     if target_ids is not None and type_id not in target_ids:
                         offset += payload_len

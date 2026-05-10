@@ -12,7 +12,7 @@ if _src_dir not in sys.path:
 from utils.shared._constants import (
     FMT_TYPE_ID, FMT_PAYLOAD_LEN, FMT_PAYLOAD_STRUCT,
     FORMAT_TO_STRUCT, FORMAT_SCALE,
-    MSG_HEADER_B0, MSG_HEADER_B1,
+    MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER,
 )
 from utils.shared.logger import get_logger
 
@@ -88,10 +88,15 @@ class FormatManager:
                         first_data = offset - 3
                     length = self.get_length(type_id)
                     if length is None:
-                        raise ValueError(
-                            f'unregistered type_id {type_id} at offset {offset - 3} '
-                            f'— FMT record may be missing or appear later in the file'
+                        _log.warning(
+                            'skipping unknown type_id=%d at offset=%d (no FMT definition)',
+                            type_id, offset - 3,
                         )
+                        next_pos = buffer.find(MSG_HEADER, offset)
+                        if next_pos == -1:
+                            break
+                        offset = next_pos
+                        continue
                     offset += length - 3
             self.data_start_offset = first_data or 0
             _log.info('loaded %s  [%d types, data offset: %d]',

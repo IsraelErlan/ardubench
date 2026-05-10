@@ -8,7 +8,7 @@ if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 from utils.shared.format_manager import FormatManager
-from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1
+from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
@@ -53,7 +53,12 @@ class SequentialParser:
 
                         length = self._fmt.get_length(type_id)
                         if length is None:
-                            raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                            _log.warning('skipping unknown type_id=%d at offset=%d', type_id, offset - 3)
+                            next_pos = buffer.find(MSG_HEADER, offset)
+                            if next_pos == -1:
+                                break
+                            offset = next_pos
+                            continue
                         payload_len = length - 3
 
                         if target_ids is None or type_id in target_ids:

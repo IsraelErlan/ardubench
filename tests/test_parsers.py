@@ -176,9 +176,9 @@ class TestSequentialParser:
         with pytest.raises(ValueError, match='truncated FMT'):
             SequentialParser(truncated_fmt_file).parse()
 
-    def test_unregistered_type_raises(self, unregistered_type_file):
-        with pytest.raises(ValueError, match='unregistered type_id'):
-            SequentialParser(unregistered_type_file).parse()
+    def test_unregistered_type_skipped(self, unregistered_type_file):
+        msgs = SequentialParser(unregistered_type_file).parse()
+        assert msgs == []
 
     def test_truncated_payload_raises(self, truncated_payload_file):
         with pytest.raises(ValueError, match='truncated payload'):
