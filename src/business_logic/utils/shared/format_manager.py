@@ -30,8 +30,15 @@ class FormatManager:
     """
 
     def __init__(self, file_path: str) -> None:
-        if not Path(file_path).is_file():
+        path = Path(file_path)
+        if not path.is_file():
             raise FileNotFoundError(f'Log file not found: {file_path}')
+        try:
+            path.open('rb').close()
+        except PermissionError:
+            raise PermissionError(f'No read permission: {file_path}')
+        if path.stat().st_size == 0:
+            raise ValueError(f'File is empty: {file_path}')
         self.file_path = file_path
         self.data_start_offset: int = 0
         self._registry: Dict[int, Dict[str, Any]] = {}
@@ -81,7 +88,10 @@ class FormatManager:
                         first_data = offset - 3
                     length = self.get_length(type_id)
                     if length is None:
-                        raise ValueError(f'unregistered type_id {type_id} at offset {offset - 3}')
+                        raise ValueError(
+                            f'unregistered type_id {type_id} at offset {offset - 3} '
+                            f'— FMT record may be missing or appear later in the file'
+                        )
                     offset += length - 3
             self.data_start_offset = first_data or 0
             _log.info('loaded %s  [%d types, data offset: %d]',
@@ -103,7 +113,8 @@ class FormatManager:
             return None
         try:
             unpacked = entry['struct'].unpack_from(buffer, offset)
-        except struct.error:
+        except struct.error as e:
+            _log.warning('decode failed for type_id=%d at offset=%d: %s', type_id, offset, e)
             return None
         return self._build_message(entry, unpacked)
 
@@ -115,12 +126,26 @@ class FormatManager:
         type_id, total_length, name_raw, fmt_raw, labels_raw = unpacked
         name = name_raw.decode('ascii', errors='ignore').strip('\x00')
         fmt_chars = fmt_raw.decode('ascii', errors='ignore').strip('\x00')
+
+        if total_length < 3:
+            raise ValueError(
+                f'FMT type_id={type_id} ({name!r}) has invalid total_length={total_length}'
+            )
+
         labels = [
             label.strip()
             for label in labels_raw.decode('ascii', errors='ignore').strip('\x00').split(',')
             if label.strip()
         ]
         scales = [FORMAT_SCALE.get(c) for c in fmt_chars if c in FORMAT_TO_STRUCT]
+
+        fmt_field_count = sum(1 for c in fmt_chars if c in FORMAT_TO_STRUCT)
+        if len(labels) != fmt_field_count:
+            _log.warning(
+                'FMT %s (type_id=%d): %d labels but %d format fields — extra fields will be dropped',
+                name, type_id, len(labels), fmt_field_count,
+            )
+
         self._registry[type_id] = {
             'name': name,
             'total_length': total_length,
