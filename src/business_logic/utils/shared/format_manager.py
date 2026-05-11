@@ -147,6 +147,8 @@ class FormatManager:
 
         fmt_field_count = sum(1 for c in fmt_chars if c in FORMAT_TO_STRUCT)
         if len(labels) != fmt_field_count:
+            missing_chars = [c for c in fmt_chars if c not in FORMAT_TO_STRUCT]
+            _log.debug('FMT %s: unrecognized format chars: %s', name, missing_chars)
             _log.warning(
                 'FMT %s (type_id=%d): %d labels but %d format fields — extra fields will be dropped',
                 name, type_id, len(labels), fmt_field_count,

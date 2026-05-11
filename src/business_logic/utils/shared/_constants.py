@@ -23,6 +23,7 @@ FORMAT_TO_STRUCT: Dict[str, str] = {
     'M': 'B',
     'q': 'q', 'Q': 'Q',
     'n': '4s', 'N': '16s', 'Z': '64s',
+    'a': '64s',
 }
 
 # Scaling divisors for format characters that store a real value as a
