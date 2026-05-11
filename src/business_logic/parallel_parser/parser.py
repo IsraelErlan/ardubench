@@ -11,10 +11,8 @@ if _src_dir not in sys.path:
 
 from utils.shared.format_manager import FormatManager
 from parallel_parser.workers import parse_chunk
-from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1
+from utils.shared._constants import MSG_HEADER
 from utils.shared.logger import get_logger
-
-_HEADER = bytes([MSG_HEADER_B0, MSG_HEADER_B1])
 
 _log = get_logger(__name__)
 
@@ -42,15 +40,15 @@ class ParallelParser:
             num_workers = n_workers or os.cpu_count() or 4
 
             with open(self._fmt.file_path, 'rb') as file:
-                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buf:
-                    self._fmt.load(buf)
+                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
+                    self._fmt.load(buffer)
 
                     target_ids = _names_to_type_ids(self._fmt, names)
                     if target_ids is not None and not target_ids:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
 
-                    splits = self._compute_byte_range_splits(num_workers, buf)
+                    splits = self._compute_byte_range_splits(num_workers, buffer)
 
             _log.debug('spawning %d worker processes', num_workers)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -83,12 +81,12 @@ class ParallelParser:
 def _find_message_start(buffer, offset: int, registry: dict) -> Optional[int]:
     scan_end = len(buffer)
     while offset + 3 <= scan_end:
-        pos = buffer.find(_HEADER, offset)
-        if pos == -1 or pos + 3 > scan_end:
+        next_pos = buffer.find(MSG_HEADER, offset)
+        if next_pos == -1 or next_pos + 3 > scan_end:
             return None
-        if buffer[pos + 2] in registry:
-            return pos
-        offset = pos + 1
+        if buffer[next_pos + 2] in registry:
+            return next_pos
+        offset = next_pos + 1
     return None
 
 

@@ -66,7 +66,7 @@ class ThreadedParser:
             _log.error('parse failed: %s', error)
             raise
 
-    def _compute_chunk_offsets(self, num_chunks: int, buffer) -> List[Optional[int]]:
+    def _compute_chunk_offsets(self, num_workers: int, buffer) -> List[Optional[int]]:
         message_offsets = []
         offset = self._fmt.data_start_offset
         scan_end = len(buffer)
@@ -82,8 +82,8 @@ class ThreadedParser:
             message_offsets.append(offset)
             offset += type_entry['total_length']
 
-        step = max(1, len(message_offsets) // num_chunks)
-        splits: List[Optional[int]] = [message_offsets[i * step] for i in range(num_chunks)]
+        step = max(1, len(message_offsets) // num_workers)
+        splits: List[Optional[int]] = [message_offsets[i * step] for i in range(num_workers)]
         splits.append(None)
         return splits
 

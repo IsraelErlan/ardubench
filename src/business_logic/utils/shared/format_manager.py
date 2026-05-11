@@ -51,14 +51,14 @@ class FormatManager:
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         state['_registry'] = {
-            type_id: {**entry, 'struct': entry['struct'].format}
-            for type_id, entry in state['_registry'].items()
+            type_id: {**type_entry, 'struct': type_entry['struct'].format}
+            for type_id, type_entry in state['_registry'].items()
         }
         return state
 
     def __setstate__(self, state: dict) -> None:
-        for entry in state['_registry'].values():
-            entry['struct'] = struct.Struct(entry['struct'])
+        for type_entry in state['_registry'].values():
+            type_entry['struct'] = struct.Struct(type_entry['struct'])
         self.__dict__.update(state)
 
     # ------------------------------------------------------------------
@@ -81,7 +81,8 @@ class FormatManager:
                 if type_id == FMT_TYPE_ID:
                     if offset + FMT_PAYLOAD_LEN > scan_end:
                         raise ValueError(f'truncated FMT record at offset {offset}')
-                    self._register_type(FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset))
+                    fmt_fields = FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset)
+                    self._register_type(fmt_fields)
                     offset += FMT_PAYLOAD_LEN
                 else:
                     if first_data is None:
@@ -109,26 +110,26 @@ class FormatManager:
         return self._name_to_id.get(name.upper())
 
     def get_length(self, type_id: int) -> Optional[int]:
-        entry = self._registry.get(type_id)
-        return entry['total_length'] if entry else None
+        type_entry = self._registry.get(type_id)
+        return type_entry['total_length'] if type_entry else None
 
     def decode_from(self, buffer, offset: int, type_id: int) -> Optional[Dict[str, Any]]:
-        entry = self._registry.get(type_id)
-        if entry is None:
+        type_entry = self._registry.get(type_id)
+        if type_entry is None:
             return None
         try:
-            unpacked = entry['struct'].unpack_from(buffer, offset)
+            payload_fields = type_entry['struct'].unpack_from(buffer, offset)
         except struct.error as e:
             _log.warning('decode failed for type_id=%d at offset=%d: %s', type_id, offset, e)
             return None
-        return self._build_message(entry, unpacked)
+        return self._build_message(type_entry, payload_fields)
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _register_type(self, unpacked: tuple) -> None:
-        type_id, total_length, name_raw, fmt_raw, labels_raw = unpacked
+    def _register_type(self, fmt_fields: tuple) -> None:
+        type_id, total_length, name_raw, fmt_raw, labels_raw = fmt_fields
         name = name_raw.decode('ascii', errors='ignore').strip('\x00')
         fmt_chars = fmt_raw.decode('ascii', errors='ignore').strip('\x00')
 
@@ -160,9 +161,9 @@ class FormatManager:
         }
         self._name_to_id[name] = type_id
 
-    def _build_message(self, entry: Dict[str, Any], unpacked: tuple) -> Dict[str, Any]:
-        message: Dict[str, Any] = {'_msg_type': entry['name']}
-        for label, value, scale in zip(entry['labels'], unpacked, entry['scales']):
+    def _build_message(self, type_entry: Dict[str, Any], payload_fields: tuple) -> Dict[str, Any]:
+        message: Dict[str, Any] = {'_msg_type': type_entry['name']}
+        for label, value, scale in zip(type_entry['labels'], payload_fields, type_entry['scales']):
             if isinstance(value, bytes):
                 value = value.decode('ascii', errors='ignore').strip('\x00')
             elif scale is not None:
