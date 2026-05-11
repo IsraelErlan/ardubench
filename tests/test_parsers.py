@@ -136,7 +136,7 @@ def truncated_payload_file(tmp_path) -> str:
 class TestSequentialParser:
     def test_parse_all_returns_all_messages(self, bin_file):
         msgs = SequentialParser(bin_file).parse()
-        assert len(msgs) == 7
+        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
 
     def test_parse_single_name_filters_correctly(self, bin_file):
         msgs = SequentialParser(bin_file).parse('GPS')
@@ -178,7 +178,7 @@ class TestSequentialParser:
 
     def test_unregistered_type_skipped(self, unregistered_type_file):
         msgs = SequentialParser(unregistered_type_file).parse()
-        assert msgs == []
+        assert all(m['_msg_type'] == 'FMT' for m in msgs)  # only FMT definition records, no unregistered data
 
     def test_truncated_payload_raises(self, truncated_payload_file):
         with pytest.raises(ValueError, match='truncated payload'):
@@ -192,7 +192,7 @@ class TestSequentialParser:
 class TestParallelParser:
     def test_parse_all_returns_all_messages(self, bin_file):
         msgs = ParallelParser(bin_file).parse(n_workers=1)
-        assert len(msgs) == 7
+        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
 
     def test_parse_single_name_filters_correctly(self, bin_file):
         msgs = ParallelParser(bin_file).parse('GPS', n_workers=1)
@@ -227,7 +227,7 @@ class TestParallelParser:
 class TestThreadedParser:
     def test_parse_all_returns_all_messages(self, bin_file):
         msgs = ThreadedParser(bin_file).parse(n_threads=1)
-        assert len(msgs) == 7
+        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
 
     def test_parse_single_name_filters_correctly(self, bin_file):
         msgs = ThreadedParser(bin_file).parse('GPS', n_threads=1)
@@ -262,7 +262,7 @@ class TestThreadedParser:
 class TestAsyncParser:
     def test_parse_all_returns_all_messages(self, bin_file):
         msgs = asyncio.run(AsyncParser(bin_file).parse())
-        assert len(msgs) == 7
+        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
 
     def test_parse_single_name_filters_correctly(self, bin_file):
         msgs = asyncio.run(AsyncParser(bin_file).parse('GPS'))
@@ -299,8 +299,7 @@ class TestCrossValidationVsMavlink:
 
     def test_all_messages_match(self, bin_file):
         seq = SequentialParser(bin_file).parse()
-        # pymavlink includes FMT records in its output — exclude them
-        mav = [m for m in MavlinkParser(bin_file).parse() if m['_msg_type'] != 'FMT']
+        mav = MavlinkParser(bin_file).parse()
 
         assert len(seq) == len(mav), (
             f'message count differs: sequential={len(seq)}, mavlink={len(mav)}'

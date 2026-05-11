@@ -67,12 +67,11 @@ class ParallelParser:
 
     def _compute_byte_range_splits(self, num_workers: int, buffer) -> List[int]:
         file_size = len(buffer)
-        data_start = self._fmt.data_start_offset
-        chunk_size = max(1, (file_size - data_start) // num_workers)
+        chunk_size = max(1, file_size // num_workers)
 
-        splits = [data_start]
+        splits = [0]
         for i in range(1, num_workers):
-            pos = _find_message_start(buffer, data_start + i * chunk_size, self._fmt._registry)
+            pos = _find_message_start(buffer, i * chunk_size, self._fmt._registry)
             splits.append(pos if pos is not None else file_size)
         splits.append(file_size)
         return splits

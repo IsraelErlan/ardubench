@@ -41,7 +41,7 @@ def parse_chunk(
                         raise ValueError(f'invalid header at offset {offset}')
                     type_id = buffer[offset + 2]
                     offset += 3
-                    type_entry = registry.get(type_id)
+                    type_entry = registry.get(type_id)   
                     if type_entry is None:
                         _log.warning('skipping unknown type_id=%d at offset=%d', type_id, offset - 3)
                         next_pos = buffer.find(MSG_HEADER, offset)

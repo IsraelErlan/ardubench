@@ -42,7 +42,7 @@ class SequentialParser:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
 
-                    offset = self._fmt.data_start_offset
+                    offset = 0
                     scan_end = len(buffer)
 
                     while offset + 3 <= scan_end:

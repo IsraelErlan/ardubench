@@ -26,7 +26,7 @@ def sync_parse(
     _log.debug('sync_parse start (target_ids=%r)', target_ids)
     try:
         messages: List[Dict[str, Any]] = []
-        offset = fmt.data_start_offset
+        offset = 0
         scan_end = len(buffer)
         registry = fmt._registry
 

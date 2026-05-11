@@ -100,6 +100,15 @@ class FormatManager:
                         continue
                     offset += length - 3
             self.data_start_offset = first_data or 0
+            if FMT_TYPE_ID not in self._registry:
+                self._register_type(FMT_PAYLOAD_STRUCT.unpack(
+                    FMT_PAYLOAD_STRUCT.pack(
+                        FMT_TYPE_ID, FMT_PAYLOAD_LEN + 3,
+                        b'FMT\x00',
+                        b'BBnNZ' + b'\x00' * 11,
+                        b'Type,Length,Name,Format,Columns' + b'\x00' * 33,
+                    )
+                ))
             _log.info('loaded %s  [%d types, data offset: %d]',
                       Path(self.file_path).name, len(self._registry), self.data_start_offset)
         except Exception as error:
@@ -144,6 +153,7 @@ class FormatManager:
             if label.strip()
         ]
         scales = [FORMAT_SCALE.get(c) for c in fmt_chars if c in FORMAT_TO_STRUCT]
+        field_fmt_chars = [c for c in fmt_chars if c in FORMAT_TO_STRUCT]
 
         fmt_field_count = sum(1 for c in fmt_chars if c in FORMAT_TO_STRUCT)
         if len(labels) != fmt_field_count:
@@ -163,14 +173,27 @@ class FormatManager:
             'struct': parsed_struct,
             'labels': labels,
             'scales': scales,
+            'fmt_chars': field_fmt_chars,
         }
         self._name_to_id[name] = type_id
 
     def _build_message(self, type_entry: Dict[str, Any], payload_fields: tuple) -> Dict[str, Any]:
         message: Dict[str, Any] = {'_msg_type': type_entry['name']}
-        for label, value, scale in zip(type_entry['labels'], payload_fields, type_entry['scales']):
+        msg_name = type_entry['name']
+        for label, value, scale, fmt_char in zip(
+            type_entry['labels'], payload_fields, type_entry['scales'], type_entry['fmt_chars']
+        ):
             if isinstance(value, bytes):
-                value = value.decode('ascii', errors='ignore').strip('\x00')
+                if fmt_char == 'Z' and msg_name == 'FILE':
+                    pass  # pymavlink special case: FILE payload returned as raw bytes
+                else:
+                    try:
+                        value = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        value = value.decode('iso-8859-1')
+                    null_pos = value.find('\x00')
+                    if null_pos != -1:
+                        value = value[:null_pos]
             elif scale is not None:
                 value = round(value * scale, 10)
             message[label] = value

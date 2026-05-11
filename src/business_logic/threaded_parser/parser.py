@@ -68,7 +68,7 @@ class ThreadedParser:
 
     def _compute_chunk_offsets(self, num_workers: int, buffer) -> List[Optional[int]]:
         message_offsets = []
-        offset = self._fmt.data_start_offset
+        offset = 0
         scan_end = len(buffer)
         registry = self._fmt._registry
 
