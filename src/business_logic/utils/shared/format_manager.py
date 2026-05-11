@@ -152,10 +152,13 @@ class FormatManager:
                 name, type_id, len(labels), fmt_field_count,
             )
 
+        struct_format = '<' + ''.join(FORMAT_TO_STRUCT.get(c, '') for c in fmt_chars)
+        parsed_struct = struct.Struct(struct_format)
+        
         self._registry[type_id] = {
             'name': name,
             'total_length': total_length,
-            'struct': struct.Struct('<' + ''.join(FORMAT_TO_STRUCT.get(c, '') for c in fmt_chars)),
+            'struct': parsed_struct,
             'labels': labels,
             'scales': scales,
         }
