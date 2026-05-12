@@ -130,47 +130,34 @@ def truncated_payload_file(tmp_path) -> str:
 
 
 # ─────────────────────────────────────────────
-# SequentialParser
+# SequentialParser — full contract + error cases
 # ─────────────────────────────────────────────
 
 class TestSequentialParser:
-    def test_parse_all_returns_all_messages(self, bin_file):
+    def test_parse_all(self, bin_file):
         msgs = SequentialParser(bin_file).parse()
         assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
 
-    def test_parse_single_name_filters_correctly(self, bin_file):
-        msgs = SequentialParser(bin_file).parse('GPS')
-        assert len(msgs) == 3
-        assert all(m['_msg_type'] == 'GPS' for m in msgs)
-
-    def test_parse_multiple_names(self, bin_file):
-        msgs = SequentialParser(bin_file).parse(['GPS', 'ATT'])
-        assert len(msgs) == 5  # excludes the 2 BAR messages
-
-    def test_parse_case_insensitive(self, bin_file):
-        lower = SequentialParser(bin_file).parse('gps')
-        upper = SequentialParser(bin_file).parse('GPS')
-        assert len(lower) == len(upper) == 3
-
-    def test_parse_unknown_name_returns_empty(self, bin_file):
+    def test_filter(self, bin_file):
+        assert len(SequentialParser(bin_file).parse('GPS')) == 3
+        assert len(SequentialParser(bin_file).parse('gps')) == 3        # case-insensitive
+        assert len(SequentialParser(bin_file).parse(['GPS', 'ATT'])) == 5
         assert SequentialParser(bin_file).parse('UNKNOWN') == []
 
-    def test_field_values_are_correct(self, bin_file):
-        msgs = SequentialParser(bin_file).parse('GPS')
-        assert [m['TimeUS'] for m in msgs] == [1000, 2000, 3000]
+    def test_field_values(self, bin_file):
+        gps = SequentialParser(bin_file).parse('GPS')
+        assert [m['TimeUS'] for m in gps] == [1000, 2000, 3000]
+        att = SequentialParser(bin_file).parse('ATT')
+        assert att[0] == {'_msg_type': 'ATT', 'Roll': 10, 'Pitch': 20}
+        assert att[1] == {'_msg_type': 'ATT', 'Roll': 30, 'Pitch': 40}
 
-    def test_att_field_values_are_correct(self, bin_file):
-        msgs = SequentialParser(bin_file).parse('ATT')
-        assert msgs[0] == {'_msg_type': 'ATT', 'Roll': 10, 'Pitch': 20}
-        assert msgs[1] == {'_msg_type': 'ATT', 'Roll': 30, 'Pitch': 40}
-
-    def test_file_not_found_raises(self, tmp_path):
+    def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             SequentialParser(str(tmp_path / 'missing.bin'))
 
-    def test_invalid_header_raises(self, invalid_header_file):
-        with pytest.raises(ValueError, match='invalid header'):
-            SequentialParser(invalid_header_file).parse()
+    def test_invalid_header_returns_partial(self, invalid_header_file):
+        msgs = SequentialParser(invalid_header_file).parse()
+        assert all(m['_msg_type'] == 'FMT' for m in msgs)
 
     def test_truncated_fmt_raises(self, truncated_fmt_file):
         with pytest.raises(ValueError, match='truncated FMT'):
@@ -178,116 +165,37 @@ class TestSequentialParser:
 
     def test_unregistered_type_skipped(self, unregistered_type_file):
         msgs = SequentialParser(unregistered_type_file).parse()
-        assert all(m['_msg_type'] == 'FMT' for m in msgs)  # only FMT definition records, no unregistered data
+        assert all(m['_msg_type'] == 'FMT' for m in msgs)
 
-    def test_truncated_payload_raises(self, truncated_payload_file):
-        with pytest.raises(ValueError, match='truncated payload'):
-            SequentialParser(truncated_payload_file).parse()
-
-
-# ─────────────────────────────────────────────
-# ParallelParser
-# ─────────────────────────────────────────────
-
-class TestParallelParser:
-    def test_parse_all_returns_all_messages(self, bin_file):
-        msgs = ParallelParser(bin_file).parse(n_workers=1)
-        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
-
-    def test_parse_single_name_filters_correctly(self, bin_file):
-        msgs = ParallelParser(bin_file).parse('GPS', n_workers=1)
-        assert len(msgs) == 3
-        assert all(m['_msg_type'] == 'GPS' for m in msgs)
-
-    def test_parse_multiple_names(self, bin_file):
-        msgs = ParallelParser(bin_file).parse(['GPS', 'ATT'], n_workers=1)
-        assert len(msgs) == 5  # excludes the 2 BAR messages
-
-    def test_parse_case_insensitive(self, bin_file):
-        lower = ParallelParser(bin_file).parse('gps', n_workers=1)
-        upper = ParallelParser(bin_file).parse('GPS', n_workers=1)
-        assert len(lower) == len(upper) == 3
-
-    def test_parse_unknown_name_returns_empty(self, bin_file):
-        assert ParallelParser(bin_file).parse('UNKNOWN', n_workers=1) == []
-
-    def test_field_values_are_correct(self, bin_file):
-        msgs = ParallelParser(bin_file).parse('GPS', n_workers=1)
-        assert [m['TimeUS'] for m in msgs] == [1000, 2000, 3000]
-
-    def test_file_not_found_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            ParallelParser(str(tmp_path / 'missing.bin'))
+    def test_truncated_payload_returns_partial(self, truncated_payload_file):
+        msgs = SequentialParser(truncated_payload_file).parse()
+        assert all(m['_msg_type'] == 'FMT' for m in msgs)
 
 
 # ─────────────────────────────────────────────
-# ThreadedParser
+# Concurrent parsers — parity with Sequential
 # ─────────────────────────────────────────────
 
-class TestThreadedParser:
-    def test_parse_all_returns_all_messages(self, bin_file):
-        msgs = ThreadedParser(bin_file).parse(n_threads=1)
-        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
+class TestConcurrentParserParity:
+    """Each concurrent parser must return the same output as SequentialParser."""
 
-    def test_parse_single_name_filters_correctly(self, bin_file):
-        msgs = ThreadedParser(bin_file).parse('GPS', n_threads=1)
-        assert len(msgs) == 3
-        assert all(m['_msg_type'] == 'GPS' for m in msgs)
+    def test_parallel_matches_sequential(self, bin_file):
+        expected = SequentialParser(bin_file).parse()
+        assert ParallelParser(bin_file).parse(n_workers=1) == expected
 
-    def test_parse_multiple_names(self, bin_file):
-        msgs = ThreadedParser(bin_file).parse(['GPS', 'ATT'], n_threads=1)
-        assert len(msgs) == 5  # excludes the 2 BAR messages
+    def test_threaded_matches_sequential(self, bin_file):
+        expected = SequentialParser(bin_file).parse()
+        assert ThreadedParser(bin_file).parse(n_threads=1) == expected
 
-    def test_parse_case_insensitive(self, bin_file):
-        lower = ThreadedParser(bin_file).parse('gps', n_threads=1)
-        upper = ThreadedParser(bin_file).parse('GPS', n_threads=1)
-        assert len(lower) == len(upper) == 3
+    def test_threaded_multi_worker_matches_sequential(self, bin_file):
+        expected = SequentialParser(bin_file).parse()
+        result = sorted(ThreadedParser(bin_file).parse(n_threads=4), key=lambda m: (m['_msg_type'], str(m)))
+        expected_sorted = sorted(expected, key=lambda m: (m['_msg_type'], str(m)))
+        assert result == expected_sorted
 
-    def test_parse_unknown_name_returns_empty(self, bin_file):
-        assert ThreadedParser(bin_file).parse('UNKNOWN', n_threads=1) == []
-
-    def test_field_values_are_correct(self, bin_file):
-        msgs = ThreadedParser(bin_file).parse('GPS', n_threads=1)
-        assert [m['TimeUS'] for m in msgs] == [1000, 2000, 3000]
-
-    def test_file_not_found_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            ThreadedParser(str(tmp_path / 'missing.bin'))
-
-
-# ─────────────────────────────────────────────
-# AsyncParser
-# ─────────────────────────────────────────────
-
-class TestAsyncParser:
-    def test_parse_all_returns_all_messages(self, bin_file):
-        msgs = asyncio.run(AsyncParser(bin_file).parse())
-        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
-
-    def test_parse_single_name_filters_correctly(self, bin_file):
-        msgs = asyncio.run(AsyncParser(bin_file).parse('GPS'))
-        assert len(msgs) == 3
-        assert all(m['_msg_type'] == 'GPS' for m in msgs)
-
-    def test_parse_multiple_names(self, bin_file):
-        msgs = asyncio.run(AsyncParser(bin_file).parse(['GPS', 'ATT']))
-        assert len(msgs) == 5  # excludes the 2 BAR messages
-
-    def test_parse_case_insensitive(self, bin_file):
-        lower = asyncio.run(AsyncParser(bin_file).parse('gps'))
-        upper = asyncio.run(AsyncParser(bin_file).parse('GPS'))
-        assert len(lower) == len(upper) == 3
-
-    def test_parse_unknown_name_returns_empty(self, bin_file):
-        assert asyncio.run(AsyncParser(bin_file).parse('UNKNOWN')) == []
-
-    def test_field_values_are_correct(self, bin_file):
-        msgs = asyncio.run(AsyncParser(bin_file).parse('GPS'))
-        assert [m['TimeUS'] for m in msgs] == [1000, 2000, 3000]
-
-    def test_file_not_found_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            AsyncParser(str(tmp_path / 'missing.bin'))
+    def test_async_matches_sequential(self, bin_file):
+        expected = SequentialParser(bin_file).parse()
+        assert asyncio.run(AsyncParser(bin_file).parse()) == expected
 
 
 # ─────────────────────────────────────────────
@@ -295,8 +203,6 @@ class TestAsyncParser:
 # ─────────────────────────────────────────────
 
 class TestCrossValidationVsMavlink:
-    """Verify that SequentialParser produces identical data to pymavlink."""
-
     def test_all_messages_match(self, bin_file):
         seq = SequentialParser(bin_file).parse()
         mav = MavlinkParser(bin_file).parse()

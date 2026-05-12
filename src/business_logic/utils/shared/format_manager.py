@@ -1,9 +1,10 @@
 """Shared FormatManager for all ArduPilot .bin log parsers."""
 
+import array
 import struct
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional, Set, Union
 
 _src_dir = str(Path(__file__).parent.parent.parent)
 if _src_dir not in sys.path:
@@ -11,12 +12,14 @@ if _src_dir not in sys.path:
 
 from utils.shared._constants import (
     FMT_TYPE_ID, FMT_PAYLOAD_LEN, FMT_PAYLOAD_STRUCT,
-    FORMAT_TO_STRUCT, FORMAT_SCALE,
+    FORMAT_TO_STRUCT, FORMAT_DIVISOR,
     MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER,
 )
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
+
+Names = Optional[Union[str, Iterable[str]]]
 
 
 class FormatManager:
@@ -33,10 +36,6 @@ class FormatManager:
         path = Path(file_path)
         if not path.is_file():
             raise FileNotFoundError(f'Log file not found: {file_path}')
-        try:
-            path.open('rb').close()
-        except PermissionError:
-            raise PermissionError(f'No read permission: {file_path}')
         if path.stat().st_size == 0:
             raise ValueError(f'File is empty: {file_path}')
         self.file_path = file_path
@@ -75,7 +74,8 @@ class FormatManager:
             first_data: Optional[int] = None
             while offset + 3 <= scan_end:
                 if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                    raise ValueError(f'invalid header at offset {offset}')
+                    _log.warning('invalid header at offset %d during FMT scan — stopping', offset)
+                    break
                 type_id = buffer[offset + 2]
                 offset += 3
                 if type_id == FMT_TYPE_ID:
@@ -99,15 +99,13 @@ class FormatManager:
                         offset = next_pos
                         continue
                     offset += length - 3
-            self.data_start_offset = first_data or 0
+            self.data_start_offset = 0 if first_data is None else first_data
             if FMT_TYPE_ID not in self._registry:
-                self._register_type(FMT_PAYLOAD_STRUCT.unpack(
-                    FMT_PAYLOAD_STRUCT.pack(
-                        FMT_TYPE_ID, FMT_PAYLOAD_LEN + 3,
-                        b'FMT\x00',
-                        b'BBnNZ' + b'\x00' * 11,
-                        b'Type,Length,Name,Format,Columns' + b'\x00' * 33,
-                    )
+                self._register_type((
+                    FMT_TYPE_ID, FMT_PAYLOAD_LEN + 3,
+                    b'FMT\x00',
+                    b'BBnNZ' + b'\x00' * 11,
+                    b'Type,Length,Name,Format,Columns' + b'\x00' * 33,
                 ))
             _log.info('loaded %s  [%d types, data offset: %d]',
                       Path(self.file_path).name, len(self._registry), self.data_start_offset)
@@ -117,6 +115,23 @@ class FormatManager:
 
     def get_id(self, name: str) -> Optional[int]:
         return self._name_to_id.get(name.upper())
+
+    def resolve_type_ids(self, names: Names) -> Optional[Set[int]]:
+        if names is None:
+            return None
+        if isinstance(names, str):
+            names = [names]
+        type_ids: Set[int] = set()
+        for name in names:
+            tid = self.get_id(name)
+            if tid is None:
+                _log.warning('resolve_type_ids: unknown message type %r', name)
+            else:
+                type_ids.add(tid)
+        return type_ids
+
+    def get_entry(self, type_id: int) -> Optional[Dict[str, Any]]:
+        return self._registry.get(type_id)
 
     def get_length(self, type_id: int) -> Optional[int]:
         type_entry = self._registry.get(type_id)
@@ -140,7 +155,8 @@ class FormatManager:
     def _register_type(self, fmt_fields: tuple) -> None:
         type_id, total_length, name_raw, fmt_raw, labels_raw = fmt_fields
         name = name_raw.decode('ascii', errors='ignore').strip('\x00')
-        fmt_chars = fmt_raw.decode('ascii', errors='ignore').strip('\x00')
+        raw_fmt = fmt_raw.decode('ascii', errors='ignore')
+        fmt_chars = raw_fmt[:raw_fmt.index('\x00')] if '\x00' in raw_fmt else raw_fmt
 
         if total_length < 3:
             raise ValueError(
@@ -152,11 +168,10 @@ class FormatManager:
             for label in labels_raw.decode('ascii', errors='ignore').strip('\x00').split(',')
             if label.strip()
         ]
-        scales = [FORMAT_SCALE.get(c) for c in fmt_chars if c in FORMAT_TO_STRUCT]
+        divisors = [FORMAT_DIVISOR.get(c) for c in fmt_chars if c in FORMAT_TO_STRUCT]
         field_fmt_chars = [c for c in fmt_chars if c in FORMAT_TO_STRUCT]
 
-        fmt_field_count = sum(1 for c in fmt_chars if c in FORMAT_TO_STRUCT)
-        if len(labels) != fmt_field_count:
+        if len(labels) != len(field_fmt_chars):
             missing_chars = [c for c in fmt_chars if c not in FORMAT_TO_STRUCT]
             _log.debug('FMT %s: unrecognized format chars: %s', name, missing_chars)
             _log.warning(
@@ -166,13 +181,13 @@ class FormatManager:
 
         struct_format = '<' + ''.join(FORMAT_TO_STRUCT.get(c, '') for c in fmt_chars)
         parsed_struct = struct.Struct(struct_format)
-        
+
         self._registry[type_id] = {
             'name': name,
             'total_length': total_length,
             'struct': parsed_struct,
             'labels': labels,
-            'scales': scales,
+            'divisors': divisors,
             'fmt_chars': field_fmt_chars,
         }
         self._name_to_id[name] = type_id
@@ -180,12 +195,14 @@ class FormatManager:
     def _build_message(self, type_entry: Dict[str, Any], payload_fields: tuple) -> Dict[str, Any]:
         message: Dict[str, Any] = {'_msg_type': type_entry['name']}
         msg_name = type_entry['name']
-        for label, value, scale, fmt_char in zip(
-            type_entry['labels'], payload_fields, type_entry['scales'], type_entry['fmt_chars']
+        for label, value, divisor, fmt_char in zip(
+            type_entry['labels'], payload_fields, type_entry['divisors'], type_entry['fmt_chars']
         ):
             if isinstance(value, bytes):
                 if fmt_char == 'Z' and msg_name == 'FILE':
                     pass  # pymavlink special case: FILE payload returned as raw bytes
+                elif fmt_char == 'a':
+                    value = array.array('h', value)
                 else:
                     try:
                         value = value.decode('utf-8')
@@ -194,7 +211,7 @@ class FormatManager:
                     null_pos = value.find('\x00')
                     if null_pos != -1:
                         value = value[:null_pos]
-            elif scale is not None:
-                value = round(value * scale, 10)
+            elif divisor is not None:
+                value = value / divisor
             message[label] = value
         return message

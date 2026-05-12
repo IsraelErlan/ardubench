@@ -2,20 +2,18 @@ import mmap
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared.format_manager import FormatManager
+from utils.shared.format_manager import FormatManager, Names
 from threaded_parser.workers import parse_chunk
-from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1
+from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
-
-Names = Optional[Union[str, Iterable[str]]]
 
 
 class ThreadedParser:
@@ -44,7 +42,7 @@ class ThreadedParser:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
                     self._fmt.load(buffer)
 
-                    target_ids = _names_to_type_ids(self._fmt, names)
+                    target_ids = self._fmt.resolve_type_ids(names)
                     if target_ids is not None and not target_ids:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
@@ -70,29 +68,32 @@ class ThreadedParser:
         message_offsets = []
         offset = 0
         scan_end = len(buffer)
-        registry = self._fmt._registry
 
         while offset + 3 <= scan_end:
             if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
                 raise ValueError(f'invalid header at offset {offset}')
             type_id = buffer[offset + 2]
-            type_entry = registry.get(type_id)
+            type_entry = self._fmt.get_entry(type_id)
             if type_entry is None:
-                raise ValueError(f'unregistered type_id {type_id} at offset {offset}')
+                _log.warning('skipping unknown type_id=%d at offset=%d', type_id, offset)
+                next_pos = buffer.find(MSG_HEADER, offset + 1)
+                if next_pos == -1:
+                    break
+                offset = next_pos
+                continue
             message_offsets.append(offset)
             offset += type_entry['total_length']
 
+        if not message_offsets:
+            return [None]
+
         step = max(1, len(message_offsets) // num_workers)
-        splits: List[Optional[int]] = [message_offsets[i * step] for i in range(num_workers)]
+        splits: List[Optional[int]] = [
+            message_offsets[i * step]
+            for i in range(num_workers)
+            if i * step < len(message_offsets)
+        ]
         splits.append(None)
         return splits
 
 
-def _names_to_type_ids(fmt: FormatManager, names: Names) -> Optional[Set[int]]:
-    if names is None:
-        return None
-    if isinstance(names, str):
-        names = [names]
-    type_ids = {fmt.get_id(name) for name in names}
-    type_ids.discard(None)
-    return type_ids
