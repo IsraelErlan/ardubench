@@ -1,3 +1,3 @@
 from parallel_parser.parser import ParallelParser
 
-__all__ = ['ParallelParser']
+__all__ = ["ParallelParser"]

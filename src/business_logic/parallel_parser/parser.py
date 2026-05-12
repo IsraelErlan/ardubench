@@ -9,9 +9,9 @@ _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared.format_manager import FormatManager, Names
 from parallel_parser.workers import parse_chunk
 from utils.shared._constants import MSG_HEADER
+from utils.shared.format_manager import FormatManager, Names
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
@@ -37,24 +37,24 @@ class ParallelParser:
         self._fmt = FormatManager(file_path)
 
     def parse(self, names: Names = None, n_workers: Optional[int] = None) -> List[Dict[str, Any]]:
-        _log.debug('parse(names=%r)', names)
+        _log.debug("parse(names=%r)", names)
         try:
             num_workers = n_workers or os.process_cpu_count() or os.cpu_count() or 4
 
-            with open(self._fmt.file_path, 'rb') as file:
+            with open(self._fmt.file_path, "rb") as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
                     self._fmt.load(buffer)
 
                     target_ids = self._fmt.resolve_type_ids(names)
                     if target_ids is not None and not target_ids:
-                        _log.warning('parse: no matching type for names=%r', names)
+                        _log.warning("parse: no matching type for names=%r", names)
                         return []
 
                     n_chunks = max(num_workers, len(buffer) // _CHUNK_SIZE)
                     splits = self._compute_byte_range_splits(n_chunks, buffer)
 
             n_chunks = len(splits) - 1
-            _log.debug('spawning %d workers across %d chunks', num_workers, n_chunks)
+            _log.debug("spawning %d workers across %d chunks", num_workers, n_chunks)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
                     executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids)
@@ -63,13 +63,13 @@ class ParallelParser:
                 chunks = [f.result() for f in futures]
 
             result = [message for chunk in chunks for message in chunk]
-            _log.info('parse(%r) -> %d messages', names, len(result))
+            _log.info("parse(%r) -> %d messages", names, len(result))
             return result
         except Exception as error:
-            _log.error('parse failed: %s', error)
+            _log.error("parse failed: %s", error)
             raise
 
-    def _compute_byte_range_splits(self, n_chunks: int, buffer) -> List[int]:
+    def _compute_byte_range_splits(self, n_chunks: int, buffer: mmap.mmap) -> List[int]:
         file_size = len(buffer)
         chunk_size = file_size // n_chunks
 
@@ -81,7 +81,7 @@ class ParallelParser:
         return list(dict.fromkeys(splits))
 
 
-def _find_message_start(buffer, offset: int, fmt: FormatManager) -> Optional[int]:
+def _find_message_start(buffer: mmap.mmap, offset: int, fmt: FormatManager) -> Optional[int]:
     scan_end = len(buffer)
     while offset + 3 <= scan_end:
         next_pos = buffer.find(MSG_HEADER, offset)

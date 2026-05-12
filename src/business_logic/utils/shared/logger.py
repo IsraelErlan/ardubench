@@ -2,8 +2,8 @@ import logging
 import os
 import sys
 
-_FORMATTER = logging.Formatter('%(levelname)-8s %(name)s: %(message)s')
-_LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+_FORMATTER = logging.Formatter("%(levelname)-8s %(name)s: %(message)s")
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
 def get_logger(name: str) -> logging.Logger:
