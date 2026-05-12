@@ -22,8 +22,8 @@ def _benchmark(label: str, fn):
 def main():
     print('\n  -- MavlinkParser (pymavlink) --')
     _benchmark('mav.parse()',                lambda: MavlinkParser(PATH).parse())
-    # _benchmark('mav.parse("gps")',         lambda: MavlinkParser(PATH).parse('gps'))
-    # _benchmark('mav.parse(["GPS","ATT"])', lambda: MavlinkParser(PATH).parse(['GPS', 'ATT']))
+    _benchmark('mav.parse("gps")',         lambda: MavlinkParser(PATH).parse('gps'))
+    _benchmark('mav.parse(["GPS","ATT"])', lambda: MavlinkParser(PATH).parse(['GPS', 'ATT']))
 
 
 if __name__ == '__main__':
