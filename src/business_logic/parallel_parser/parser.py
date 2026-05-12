@@ -17,7 +17,7 @@ from utils.shared.logger import get_logger
 _log = get_logger(__name__)
 
 
-_CHUNK_SIZE = 256 * 1024  # 256 KB per chunk
+_CHUNK_SIZE = 1024 * 1024  # 1 MB per chunk
 
 
 class ParallelParser:
@@ -39,7 +39,7 @@ class ParallelParser:
     def parse(self, names: Names = None, n_workers: Optional[int] = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
         try:
-            num_workers = n_workers or os.cpu_count() or 4
+            num_workers = n_workers or os.process_cpu_count() or os.cpu_count() or 4
 
             with open(self._fmt.file_path, 'rb') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
@@ -71,14 +71,14 @@ class ParallelParser:
 
     def _compute_byte_range_splits(self, n_chunks: int, buffer) -> List[int]:
         file_size = len(buffer)
-        chunk_size = max(1, file_size // n_chunks)
+        chunk_size = file_size // n_chunks
 
         splits = [0]
         for i in range(1, n_chunks):
             pos = _find_message_start(buffer, i * chunk_size, self._fmt)
             splits.append(pos if pos is not None else file_size)
         splits.append(file_size)
-        return splits
+        return list(dict.fromkeys(splits))
 
 
 def _find_message_start(buffer, offset: int, fmt: FormatManager) -> Optional[int]:
