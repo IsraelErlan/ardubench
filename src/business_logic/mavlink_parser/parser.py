@@ -1,17 +1,16 @@
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
 from pymavlink import mavutil
+from utils.shared.format_manager import Names
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
-
-Names = Optional[Union[str, Iterable[str]]]
 
 
 class MavlinkParser:
@@ -34,6 +33,7 @@ class MavlinkParser:
     def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
         try:
+            type_filter = _resolve_type_filter(names)
             mlog = mavutil.mavlink_connection(self.file_path, robust_parsing=True)
             messages: List[Dict[str, Any]] = []
 
@@ -42,6 +42,8 @@ class MavlinkParser:
                 if msg is None:
                     break
                 if msg.get_type() == 'BAD_DATA':
+                    continue
+                if type_filter is not None and msg.get_type() not in type_filter:
                     continue
                 row = msg.to_dict()
                 row['_msg_type'] = row.pop('mavpackettype', msg.get_type())
