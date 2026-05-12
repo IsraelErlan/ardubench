@@ -1,0 +1,24 @@
+[MAIN]
+jobs = 0
+
+[FORMAT]
+max-line-length = 120
+
+[MESSAGES CONTROL]
+disable =
+    # sys.path manipulation before project imports is intentional in every module
+    wrong-import-position,
+    # small private helpers don't need docstrings
+    missing-function-docstring,
+    missing-module-docstring,
+    # parser classes intentionally expose only parse()
+    too-few-public-methods,
+    # parallel/threaded parsers share the same interface pattern by design
+    duplicate-code,
+
+[DESIGN]
+max-locals = 20
+
+[BASIC]
+# allow _src_dir, _log and other module-level private constants
+const-rgx = [_a-z][_a-z0-9]*|[A-Z][A-Z0-9_]*
