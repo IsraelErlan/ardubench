@@ -17,11 +17,15 @@ from utils.shared.logger import get_logger
 _log = get_logger(__name__)
 
 
+_CHUNK_SIZE = 1024 * 1024  # 1 MB per chunk
+
+
 class ParallelParser:
     """Multi-process parser for ArduPilot .bin log files.
 
-    Splits the file into equal chunks and decodes each chunk in a separate
-    process. Fastest option for parsing all messages from large files.
+    Splits the file into 1 MB chunks distributed across a fixed worker pool.
+    Each worker processes multiple chunks, improving load balancing when
+    message density varies across the file.
 
     parser = ParallelParser('flight.bin')
     parser.parse()               # all messages
@@ -46,13 +50,15 @@ class ParallelParser:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
 
-                    splits = self._compute_byte_range_splits(num_workers, buffer)
+                    n_chunks = max(num_workers, len(buffer) // _CHUNK_SIZE)
+                    splits = self._compute_byte_range_splits(n_chunks, buffer)
 
-            _log.debug('spawning %d worker processes', num_workers)
+            n_chunks = len(splits) - 1
+            _log.debug('spawning %d workers across %d chunks', num_workers, n_chunks)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
                     executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids)
-                    for i in range(num_workers)
+                    for i in range(n_chunks)
                 ]
                 chunks = [f.result() for f in futures]
 
@@ -63,12 +69,12 @@ class ParallelParser:
             _log.error('parse failed: %s', error)
             raise
 
-    def _compute_byte_range_splits(self, num_workers: int, buffer) -> List[int]:
+    def _compute_byte_range_splits(self, n_chunks: int, buffer) -> List[int]:
         file_size = len(buffer)
-        chunk_size = max(1, file_size // num_workers)
+        chunk_size = max(1, file_size // n_chunks)
 
         splits = [0]
-        for i in range(1, num_workers):
+        for i in range(1, n_chunks):
             pos = _find_message_start(buffer, i * chunk_size, self._fmt)
             splits.append(pos if pos is not None else file_size)
         splits.append(file_size)
