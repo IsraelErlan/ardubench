@@ -17,7 +17,7 @@ from utils.shared.logger import get_logger
 _log = get_logger(__name__)
 
 
-_CHUNK_SIZE = 1024 * 1024  # 1 MB per chunk
+_CHUNK_SIZE = 256 * 1024  # 256 KB per chunk
 
 
 class ParallelParser:
