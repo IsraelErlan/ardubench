@@ -2,19 +2,17 @@ import asyncio
 import mmap
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared.format_manager import FormatManager
+from utils.shared.format_manager import FormatManager, Names
 from async_parser.workers import sync_parse
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
-
-Names = Optional[Union[str, Iterable[str]]]
 
 
 class AsyncParser:
@@ -35,30 +33,24 @@ class AsyncParser:
 
     async def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
+        file = open(self._fmt.file_path, 'rb')
+        buffer = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
         try:
-            with open(self._fmt.file_path, 'rb') as file:
-                with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
-                    self._fmt.load(buffer)
+            await asyncio.to_thread(self._fmt.load, buffer)
 
-                    target_ids = _names_to_type_ids(self._fmt, names)
-                    if target_ids is not None and not target_ids:
-                        _log.warning('parse: no matching type for names=%r', names)
-                        return []
+            target_ids = self._fmt.resolve_type_ids(names)
+            if target_ids is not None and not target_ids:
+                _log.warning('parse: no matching type for names=%r', names)
+                return []
 
-                    result = await asyncio.to_thread(sync_parse, buffer, self._fmt, target_ids)
-
+            result = await asyncio.to_thread(sync_parse, buffer, self._fmt, target_ids)
             _log.info('parse(%r) -> %d messages', names, len(result))
             return result
         except Exception as error:
             _log.error('parse failed: %s', error)
             raise
+        finally:
+            buffer.close()
+            file.close()
 
 
-def _names_to_type_ids(fmt: FormatManager, names: Names) -> Optional[Set[int]]:
-    if names is None:
-        return None
-    if isinstance(names, str):
-        names = [names]
-    type_ids = {fmt.get_id(name) for name in names}
-    type_ids.discard(None)
-    return type_ids

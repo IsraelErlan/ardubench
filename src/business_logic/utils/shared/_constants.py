@@ -20,18 +20,19 @@ FORMAT_TO_STRUCT: Dict[str, str] = {
     'c': 'h', 'C': 'H',
     'e': 'i', 'E': 'I',
     'L': 'i',
-    'M': 'B',
+    'M': 'b',
     'q': 'q', 'Q': 'Q',
     'n': '4s', 'N': '16s', 'Z': '64s',
     'a': '64s',
+    'g': 'e',
 }
 
-# Scaling divisors for format characters that store a real value as a
-# multiplied integer (e.g. Lat stored as degrees × 1e7).
-FORMAT_SCALE: Dict[str, float] = {
-    'c': 1e-2, 'C': 1e-2,
-    'e': 1e-2, 'E': 1e-2,
-    'L': 1e-7,
+# Integer divisors for format characters that store a real value as a
+# scaled integer (e.g. Lat stored as degrees × 1e7).
+FORMAT_DIVISOR: Dict[str, int] = {
+    'c': 100, 'C': 100,
+    'e': 100, 'E': 100,
+    'L': 10_000_000,
 }
 
 # Pre-compiled struct for unpacking a raw FMT payload:

@@ -3,20 +3,18 @@ import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared.format_manager import FormatManager
+from utils.shared.format_manager import FormatManager, Names
 from parallel_parser.workers import parse_chunk
 from utils.shared._constants import MSG_HEADER
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
-
-Names = Optional[Union[str, Iterable[str]]]
 
 
 class ParallelParser:
@@ -43,7 +41,7 @@ class ParallelParser:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
                     self._fmt.load(buffer)
 
-                    target_ids = _names_to_type_ids(self._fmt, names)
+                    target_ids = self._fmt.resolve_type_ids(names)
                     if target_ids is not None and not target_ids:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
@@ -71,29 +69,19 @@ class ParallelParser:
 
         splits = [0]
         for i in range(1, num_workers):
-            pos = _find_message_start(buffer, i * chunk_size, self._fmt._registry)
+            pos = _find_message_start(buffer, i * chunk_size, self._fmt)
             splits.append(pos if pos is not None else file_size)
         splits.append(file_size)
         return splits
 
 
-def _find_message_start(buffer, offset: int, registry: dict) -> Optional[int]:
+def _find_message_start(buffer, offset: int, fmt: FormatManager) -> Optional[int]:
     scan_end = len(buffer)
     while offset + 3 <= scan_end:
         next_pos = buffer.find(MSG_HEADER, offset)
         if next_pos == -1 or next_pos + 3 > scan_end:
             return None
-        if buffer[next_pos + 2] in registry:
+        if fmt.get_entry(buffer[next_pos + 2]) is not None:
             return next_pos
         offset = next_pos + 1
     return None
-
-
-def _names_to_type_ids(fmt: FormatManager, names: Names) -> Optional[Set[int]]:
-    if names is None:
-        return None
-    if isinstance(names, str):
-        names = [names]
-    type_ids = {fmt.get_id(name) for name in names}
-    type_ids.discard(None)
-    return type_ids

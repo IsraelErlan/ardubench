@@ -1,19 +1,17 @@
 import mmap
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from utils.shared.format_manager import FormatManager
-from utils.shared._constants import MSG_HEADER_B0, MSG_HEADER_B1, MSG_HEADER
+from utils.shared.format_manager import FormatManager, Names
+from utils.shared.buffer_parser import parse_buffer
 from utils.shared.logger import get_logger
 
 _log = get_logger(__name__)
-
-Names = Optional[Union[str, Iterable[str]]]
 
 
 class SequentialParser:
@@ -30,45 +28,17 @@ class SequentialParser:
 
     def parse(self, names: Names = None) -> List[Dict[str, Any]]:
         _log.debug('parse(names=%r)', names)
-        messages: List[Dict[str, Any]] = []
-
         try:
             with open(self._fmt.file_path, 'rb') as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:
                     self._fmt.load(buffer)
 
-                    target_ids = _names_to_type_ids(self._fmt, names)
+                    target_ids = self._fmt.resolve_type_ids(names)
                     if target_ids is not None and not target_ids:
                         _log.warning('parse: no matching type for names=%r', names)
                         return []
 
-                    offset = 0
-                    scan_end = len(buffer)
-
-                    while offset + 3 <= scan_end:
-                        if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                            raise ValueError(f'invalid header at offset {offset}')
-                        type_id = buffer[offset + 2]
-                        offset += 3
-
-                        length = self._fmt.get_length(type_id)
-                        if length is None:
-                            _log.warning('skipping unknown type_id=%d at offset=%d', type_id, offset - 3)
-                            next_pos = buffer.find(MSG_HEADER, offset)
-                            if next_pos == -1:
-                                break
-                            offset = next_pos
-                            continue
-                        payload_len = length - 3
-
-                        if target_ids is None or type_id in target_ids:
-                            if offset + payload_len > scan_end:
-                                raise ValueError(f'truncated payload for type_id {type_id} at offset {offset}')
-                            message = self._fmt.decode_from(buffer, offset, type_id)
-                            if message is not None:
-                                messages.append(message)
-
-                        offset += payload_len
+                    messages = parse_buffer(buffer, self._fmt, target_ids)
 
         except Exception as error:
             _log.error('parse failed: %s', error)
@@ -78,11 +48,3 @@ class SequentialParser:
         return messages
 
 
-def _names_to_type_ids(fmt: FormatManager, names: Names) -> Optional[Set[int]]:
-    if names is None:
-        return None
-    if isinstance(names, str):
-        names = [names]
-    type_ids = {fmt.get_id(name) for name in names}
-    type_ids.discard(None)
-    return type_ids
