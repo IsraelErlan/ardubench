@@ -71,7 +71,8 @@ class ThreadedParser:
 
         while offset + 3 <= scan_end:
             if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                raise ValueError(f'invalid header at offset {offset}')
+                _log.warning('invalid header at offset %d — stopping chunk split', offset)
+                break
             type_id = buffer[offset + 2]
             type_entry = self._fmt.get_entry(type_id)
             if type_entry is None:

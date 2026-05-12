@@ -39,7 +39,6 @@ class FormatManager:
         if path.stat().st_size == 0:
             raise ValueError(f'File is empty: {file_path}')
         self.file_path = file_path
-        self.data_start_offset: int = 0
         self._registry: Dict[int, Dict[str, Any]] = {}
         self._name_to_id: Dict[str, int] = {}
 
@@ -66,12 +65,10 @@ class FormatManager:
 
     def load(self, buffer) -> None:
         """Scan FMT records from an already-open mmap buffer."""
-        self.data_start_offset = 0
         self._registry.clear()
         self._name_to_id.clear()
         try:
             offset, scan_end = 0, len(buffer)
-            first_data: Optional[int] = None
             while offset + 3 <= scan_end:
                 if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
                     _log.warning('invalid header at offset %d during FMT scan — stopping', offset)
@@ -85,8 +82,6 @@ class FormatManager:
                     self._register_type(fmt_fields)
                     offset += FMT_PAYLOAD_LEN
                 else:
-                    if first_data is None:
-                        first_data = offset - 3
                     length = self.get_length(type_id)
                     if length is None:
                         _log.warning(
@@ -99,7 +94,6 @@ class FormatManager:
                         offset = next_pos
                         continue
                     offset += length - 3
-            self.data_start_offset = 0 if first_data is None else first_data
             if FMT_TYPE_ID not in self._registry:
                 self._register_type((
                     FMT_TYPE_ID, FMT_PAYLOAD_LEN + 3,
@@ -107,8 +101,7 @@ class FormatManager:
                     b'BBnNZ' + b'\x00' * 11,
                     b'Type,Length,Name,Format,Columns' + b'\x00' * 33,
                 ))
-            _log.info('loaded %s  [%d types, data offset: %d]',
-                      Path(self.file_path).name, len(self._registry), self.data_start_offset)
+            _log.info('loaded %s  [%d types]', Path(self.file_path).name, len(self._registry))
         except Exception as error:
             _log.error('failed to load FMT records from %s: %s', Path(self.file_path).name, error)
             raise
@@ -176,7 +169,7 @@ class FormatManager:
             _log.debug('FMT %s: unrecognized format chars: %s', name, missing_chars)
             _log.warning(
                 'FMT %s (type_id=%d): %d labels but %d format fields — extra fields will be dropped',
-                name, type_id, len(labels), fmt_field_count,
+                name, type_id, len(labels), len(field_fmt_chars),
             )
 
         struct_format = '<' + ''.join(FORMAT_TO_STRUCT.get(c, '') for c in fmt_chars)
