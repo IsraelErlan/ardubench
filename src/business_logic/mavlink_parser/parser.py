@@ -27,11 +27,11 @@ class MavlinkParser:
 
     def __init__(self, file_path: str) -> None:
         if not Path(file_path).is_file():
-            raise FileNotFoundError(f'Log file not found: {file_path}')
+            raise FileNotFoundError(f"Log file not found: {file_path}")
         self.file_path = file_path
 
     def parse(self, names: Names = None) -> List[Dict[str, Any]]:
-        _log.debug('parse(names=%r)', names)
+        _log.debug("parse(names=%r)", names)
         try:
             type_filter = _resolve_type_filter(names)
             mlog = mavutil.mavlink_connection(self.file_path, robust_parsing=True)
@@ -41,18 +41,18 @@ class MavlinkParser:
                 msg = mlog.recv_msg()
                 if msg is None:
                     break
-                if msg.get_type() == 'BAD_DATA':
+                if msg.get_type() == "BAD_DATA":
                     continue
                 if type_filter is not None and msg.get_type() not in type_filter:
                     continue
                 row = msg.to_dict()
-                row['_msg_type'] = row.pop('mavpackettype', msg.get_type())
+                row["_msg_type"] = row.pop("mavpackettype", msg.get_type())
                 messages.append(row)
 
-            _log.info('parse(%r) -> %d messages', names, len(messages))
+            _log.info("parse(%r) -> %d messages", names, len(messages))
             return messages
         except Exception as error:
-            _log.error('parse failed: %s', error)
+            _log.error("parse failed: %s", error)
             raise
 
 
