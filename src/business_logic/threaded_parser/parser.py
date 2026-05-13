@@ -12,6 +12,7 @@ from threaded_parser.workers import parse_chunk
 from utils.shared._constants import MSG_HEADER, MSG_HEADER_B0, MSG_HEADER_B1
 from utils.shared.format_manager import FormatManager, Names
 from utils.shared.logger import get_logger
+from utils.shared.timestamp_clock import init_clock
 
 _log = get_logger(__name__)
 
@@ -47,12 +48,13 @@ class ThreadedParser:
                         _log.warning("parse: no matching type for names=%r", names)
                         return []
 
+                    clock = init_clock(buffer, self._fmt)
                     splits = self._compute_chunk_offsets(num_threads, buffer)
 
                     _log.debug("spawning %d worker threads", num_threads)
                     with ThreadPoolExecutor(max_workers=num_threads) as executor:
                         futures = [
-                            executor.submit(parse_chunk, buffer, self._fmt, splits[i], splits[i + 1], target_ids)
+                            executor.submit(parse_chunk, buffer, self._fmt, splits[i], splits[i + 1], target_ids, clock)
                             for i in range(len(splits) - 1)
                         ]
                         chunks = [f.result() for f in futures]

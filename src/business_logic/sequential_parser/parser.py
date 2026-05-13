@@ -10,6 +10,7 @@ if _src_dir not in sys.path:
 from utils.shared.buffer_parser import parse_buffer
 from utils.shared.format_manager import FormatManager, Names
 from utils.shared.logger import get_logger
+from utils.shared.timestamp_clock import init_clock
 
 _log = get_logger(__name__)
 
@@ -38,7 +39,8 @@ class SequentialParser:
                         _log.warning("parse: no matching type for names=%r", names)
                         return []
 
-                    messages = parse_buffer(buffer, self._fmt, target_ids)
+                    clock = init_clock(buffer, self._fmt)
+                    messages = parse_buffer(buffer, self._fmt, target_ids, clock=clock)
 
         except Exception as error:
             _log.error("parse failed: %s", error)

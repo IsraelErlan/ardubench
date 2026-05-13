@@ -13,6 +13,7 @@ from parallel_parser.workers import parse_chunk
 from utils.shared._constants import MSG_HEADER
 from utils.shared.format_manager import FormatManager, Names
 from utils.shared.logger import get_logger
+from utils.shared.timestamp_clock import TimestampClock, init_clock
 
 _log = get_logger(__name__)
 
@@ -50,6 +51,7 @@ class ParallelParser:
                         _log.warning("parse: no matching type for names=%r", names)
                         return []
 
+                    clock = init_clock(buffer, self._fmt)
                     n_chunks = max(num_workers, len(buffer) // _CHUNK_SIZE)
                     splits = self._compute_byte_range_splits(n_chunks, buffer)
 
@@ -57,7 +59,7 @@ class ParallelParser:
             _log.debug("spawning %d workers across %d chunks", num_workers, n_chunks)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids)
+                    executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids, clock)
                     for i in range(n_chunks)
                 ]
                 chunks = [f.result() for f in futures]

@@ -47,6 +47,7 @@ class FormatManager:
         self.file_path = file_path
         self._registry: Dict[int, Dict[str, Any]] = {}
         self._name_to_id: Dict[str, int] = {}
+        self.first_data_offset: int = 0
 
     # ------------------------------------------------------------------
     # Pickle support (struct.Struct is not picklable in Python 3.14+)
@@ -73,8 +74,10 @@ class FormatManager:
         """Scan FMT records from an already-open mmap buffer."""
         self._registry.clear()
         self._name_to_id.clear()
+        self.first_data_offset = 0
         try:
             offset, scan_end = 0, len(buffer)
+            first_data_found = False
             while offset + 3 <= scan_end:
                 if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
                     _log.warning("invalid header at offset %d during FMT scan — stopping", offset)
@@ -88,6 +91,9 @@ class FormatManager:
                     self._register_type(fmt_fields)
                     offset += FMT_PAYLOAD_LEN
                 else:
+                    if not first_data_found:
+                        self.first_data_offset = offset - 3
+                        first_data_found = True
                     length = self.get_length(type_id)
                     if length is None:
                         _log.warning(

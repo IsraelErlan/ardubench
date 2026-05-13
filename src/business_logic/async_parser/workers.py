@@ -16,6 +16,7 @@ if _src_dir not in sys.path:
 from utils.shared.buffer_parser import parse_buffer
 from utils.shared.format_manager import FormatManager
 from utils.shared.logger import get_logger
+from utils.shared.timestamp_clock import init_clock
 
 _log = get_logger(__name__)
 
@@ -27,7 +28,8 @@ def sync_parse(
 ) -> List[Dict[str, Any]]:
     _log.debug("sync_parse start (target_ids=%r)", target_ids)
     try:
-        messages = parse_buffer(buffer, fmt, target_ids)
+        clock = init_clock(buffer, fmt)
+        messages = parse_buffer(buffer, fmt, target_ids, clock=clock)
         _log.debug("sync_parse -> %d messages", len(messages))
         return messages
     except Exception as error:

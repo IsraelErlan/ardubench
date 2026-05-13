@@ -12,6 +12,7 @@ if _src_dir not in sys.path:
 from utils.shared._constants import MSG_HEADER, MSG_HEADER_B0, MSG_HEADER_B1
 from utils.shared.format_manager import FormatManager
 from utils.shared.logger import get_logger
+from utils.shared.timestamp_clock import TimestampClock
 
 _log = get_logger(__name__)
 
@@ -22,6 +23,7 @@ def parse_buffer(
     target_ids: Optional[Set[int]],
     start_offset: int = 0,
     end_offset: Optional[int] = None,
+    clock: Optional[TimestampClock] = None,
 ) -> List[Dict[str, Any]]:
     """Parse messages from an open mmap buffer within a byte range."""
     messages: List[Dict[str, Any]] = []
@@ -44,6 +46,8 @@ def parse_buffer(
             continue
         payload_len = type_entry["total_length"] - 3
         if target_ids is not None and type_id not in target_ids:
+            if clock is not None:
+                clock.advance_from_payload(buffer[offset : offset + payload_len], type_entry)
             offset += payload_len
             continue
         if offset + payload_len > scan_end:
@@ -51,6 +55,8 @@ def parse_buffer(
             break
         message = fmt.decode_from(buffer, offset, type_id)
         if message is not None:
+            if clock is not None:
+                clock.set_message_timestamp(message, type_entry)
             messages.append(message)
         offset += payload_len
 
