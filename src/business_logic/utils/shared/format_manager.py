@@ -77,15 +77,32 @@ class FormatManager:
             first_data_found = False
             while offset + 3 <= scan_end:
                 if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                    _log.warning("invalid header at offset %d during FMT scan — stopping", offset)
-                    break
+                    _log.warning("invalid header at offset %d during FMT scan — scanning for next valid message", offset)
+                    recovered = self.find_next_message(buffer, offset + 1, scan_end)
+                    if recovered is None:
+                        break
+                    offset = recovered
+                    continue
                 type_id = buffer[offset + 2]
                 offset += 3
                 if type_id == FMT_TYPE_ID:
                     if offset + FMT_PAYLOAD_LEN > scan_end:
-                        raise ValueError(f"truncated FMT record at offset {offset}")
+                        _log.warning("truncated FMT record at offset %d — skipping", offset)
+                        recovered = self.find_next_message(buffer, offset, scan_end)
+                        if recovered is None:
+                            break
+                        offset = recovered
+                        continue
                     fmt_fields = FMT_PAYLOAD_STRUCT.unpack_from(buffer, offset)
-                    self._register_type(fmt_fields)
+                    try:
+                        self._register_type(fmt_fields)
+                    except ValueError as e:
+                        _log.warning("skipping invalid FMT record at offset %d: %s", offset, e)
+                        recovered = self.find_next_message(buffer, offset, scan_end)
+                        if recovered is None:
+                            break
+                        offset = recovered
+                        continue
                     offset += FMT_PAYLOAD_LEN
                 else:
                     if not first_data_found:
@@ -104,20 +121,21 @@ class FormatManager:
                         offset = next_pos
                         continue
                     offset += length - 3
-            if FMT_TYPE_ID not in self._registry:
-                self._register_type(
-                    (
-                        FMT_TYPE_ID,
-                        FMT_PAYLOAD_LEN + 3,
-                        b"FMT\x00",
-                        b"BBnNZ" + b"\x00" * 11,
-                        b"Type,Length,Name,Format,Columns" + b"\x00" * 33,
-                    )
-                )
             _log.info("loaded %s  [%d types]", Path(self.file_path).name, len(self._registry))
         except Exception as error:
             _log.error("failed to load FMT records from %s: %s", Path(self.file_path).name, error)
             raise
+
+    def find_next_message(self, buffer: Union[mmap.mmap, bytes], offset: int, scan_end: int) -> Optional[int]:
+        """Return the next offset with a valid header and a known type_id, or None."""
+        while offset + 3 <= scan_end:
+            next_pos = buffer.find(MSG_HEADER, offset, scan_end)
+            if next_pos == -1:
+                return None
+            if self._registry.get(buffer[next_pos + 2]) is not None:
+                return next_pos
+            offset = next_pos + 1
+        return None
 
     def get_id(self, name: str) -> Optional[int]:
         """Return type_id for a message name (case-insensitive), or None if unknown."""

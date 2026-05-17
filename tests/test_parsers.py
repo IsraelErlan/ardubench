@@ -66,8 +66,9 @@ BAR_STRUCT = struct.Struct('<H')  # Alt: uint16
 
 @pytest.fixture
 def bin_file(tmp_path) -> str:
-    """Valid .bin with 3 GPS, 2 ATT and 2 BAR messages."""
+    """Valid .bin with 4 FMT, 3 GPS, 2 ATT and 2 BAR messages."""
     content = (
+        _fmt_record(_FMT_TYPE_ID, 'FMT', 'BBnNZ', 'Type,Length,Name,Format,Columns') +
         _fmt_record(GPS_ID, 'GPS', 'I',  'TimeUS') +
         _fmt_record(ATT_ID, 'ATT', 'HH', 'Roll,Pitch') +
         _fmt_record(BAR_ID, 'BAR', 'H',  'Alt') +
@@ -136,7 +137,7 @@ def truncated_payload_file(tmp_path) -> str:
 class TestSequentialParser:
     def test_parse_all(self, bin_file):
         msgs = SequentialParser(bin_file).parse()
-        assert len(msgs) == 10  # 3 FMT + 3 GPS + 2 ATT + 2 BAR
+        assert len(msgs) == 11  # 4 FMT + 3 GPS + 2 ATT + 2 BAR
 
     def test_filter(self, bin_file):
         assert len(SequentialParser(bin_file).parse('GPS')) == 3
@@ -147,10 +148,10 @@ class TestSequentialParser:
     def test_field_values(self, bin_file):
         gps = SequentialParser(bin_file).parse('GPS')
         assert [m['TimeUS'] for m in gps] == [1000, 2000, 3000]
-        assert [m['_timestamp'] for m in gps] == [0.001, 0.002, 0.003]
+        assert [m['_timestamp'] for m in gps] == ['1970-01-01 02:00:00.001', '1970-01-01 02:00:00.002', '1970-01-01 02:00:00.003']
         att = SequentialParser(bin_file).parse('ATT')
-        assert att[0] == {'_msg_type': 'ATT', 'Roll': 10, 'Pitch': 20, '_timestamp': 0.001}
-        assert att[1] == {'_msg_type': 'ATT', 'Roll': 30, 'Pitch': 40, '_timestamp': 0.002}
+        assert att[0] == {'_msg_type': 'ATT', 'Roll': 10, 'Pitch': 20, '_timestamp': '1970-01-01 02:00:00.001'}
+        assert att[1] == {'_msg_type': 'ATT', 'Roll': 30, 'Pitch': 40, '_timestamp': '1970-01-01 02:00:00.002'}
 
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -160,9 +161,9 @@ class TestSequentialParser:
         msgs = SequentialParser(invalid_header_file).parse()
         assert all(m['_msg_type'] == 'FMT' for m in msgs)
 
-    def test_truncated_fmt_raises(self, truncated_fmt_file):
-        with pytest.raises(ValueError, match='truncated FMT'):
-            SequentialParser(truncated_fmt_file).parse()
+    def test_truncated_fmt_returns_empty(self, truncated_fmt_file):
+        msgs = SequentialParser(truncated_fmt_file).parse()
+        assert msgs == []
 
     def test_unregistered_type_skipped(self, unregistered_type_file):
         msgs = SequentialParser(unregistered_type_file).parse()

@@ -142,6 +142,7 @@ class TimestampClock:
 # ------------------------------------------------------------------
 
 
+
 def init_clock(buffer: Any, fmt: "FormatManager") -> TimestampClock:
     """Pre-scan the buffer to build a TimestampClock.
 
@@ -161,7 +162,11 @@ def init_clock(buffer: Any, fmt: "FormatManager") -> TimestampClock:
 
     while offset + 3 <= scan_end:
         if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-            break
+            nxt = fmt.find_next_message(buffer, offset + 1, scan_end)
+            if nxt is None:
+                break
+            offset = nxt
+            continue
         type_id = buffer[offset + 2]
         offset += 3
 

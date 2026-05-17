@@ -73,8 +73,12 @@ class ThreadedParser:
 
         while offset + 3 <= scan_end:
             if buffer[offset] != MSG_HEADER_B0 or buffer[offset + 1] != MSG_HEADER_B1:
-                _log.warning("invalid header at offset %d — stopping chunk split", offset)
-                break
+                _log.warning("invalid header at offset %d — scanning for next valid message", offset)
+                recovered = self._fmt.find_next_message(buffer, offset + 1, scan_end)
+                if recovered is None:
+                    break
+                offset = recovered
+                continue
             type_id = buffer[offset + 2]
             type_entry = self._fmt.get_entry(type_id)
             if type_entry is None:
