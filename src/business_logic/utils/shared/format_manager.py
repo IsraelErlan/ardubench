@@ -72,9 +72,6 @@ class FormatManager:
 
     def load(self, buffer: mmap.mmap) -> None:
         """Scan FMT records from an already-open mmap buffer."""
-        self._registry.clear()
-        self._name_to_id.clear()
-        self.first_data_offset = 0
         try:
             offset, scan_end = 0, len(buffer)
             first_data_found = False
@@ -123,9 +120,11 @@ class FormatManager:
             raise
 
     def get_id(self, name: str) -> Optional[int]:
+        """Return type_id for a message name (case-insensitive), or None if unknown."""
         return self._name_to_id.get(name.upper())
 
     def resolve_type_ids(self, names: Names) -> Optional[Set[int]]:
+        """Resolve a names filter to a set of type_ids, or None meaning 'all types'."""
         if names is None:
             return None
         if isinstance(names, str):
@@ -140,13 +139,16 @@ class FormatManager:
         return type_ids
 
     def get_entry(self, type_id: int) -> Optional[Dict[str, Any]]:
+        """Return the registry entry for type_id, or None if not yet defined."""
         return self._registry.get(type_id)
 
     def get_length(self, type_id: int) -> Optional[int]:
+        """Return the total message length (header + payload) for type_id."""
         type_entry = self._registry.get(type_id)
         return type_entry["total_length"] if type_entry else None
 
     def decode_from(self, buffer: Union[mmap.mmap, bytes], offset: int, type_id: int) -> Optional[Dict[str, Any]]:
+        """Unpack payload at *offset* and return a decoded message dict, or None on error."""
         type_entry = self._registry.get(type_id)
         if type_entry is None:
             return None
@@ -162,6 +164,7 @@ class FormatManager:
     # ------------------------------------------------------------------
 
     def _register_type(self, fmt_fields: tuple) -> None:
+        """Parse a raw FMT payload tuple and add the type to the registry."""
         type_id, total_length, name_raw, fmt_raw, labels_raw = fmt_fields
         name = name_raw.decode("ascii", errors="ignore").strip("\x00")
         raw_fmt = fmt_raw.decode("ascii", errors="ignore")
@@ -203,6 +206,7 @@ class FormatManager:
         self._name_to_id[name] = type_id
 
     def _build_message(self, type_entry: Dict[str, Any], payload_fields: tuple) -> Dict[str, Any]:
+        """Convert unpacked struct fields to a labelled dict, applying divisors and decoding bytes."""
         message: Dict[str, Any] = {"_msg_type": type_entry["name"]}
         msg_name = type_entry["name"]
         for label, value, divisor, fmt_char in zip(

@@ -19,7 +19,9 @@ ardubench/
         ├── utils/
         │   └── shared/
         │       ├── _constants.py       ← binary protocol constants
+        │       ├── buffer_parser.py    ← core scanning loop (shared by all parsers)
         │       ├── format_manager.py   ← shared FMT scanner & decoder
+        │       ├── timestamp_clock.py  ← GPS-based timestamp computation
         │       └── logger.py           ← shared logger factory
         ├── sequential_parser/
         ├── parallel_parser/
@@ -44,7 +46,7 @@ Each parser package contains:
 ## Parsers
 
 ### SequentialParser
-Single process, single thread. Opens the file once with `mmap`, loads FMT records, then parses from `data_start_offset` to EOF. The simplest implementation and the baseline for comparisons.
+Single process, single thread. Opens the file once with `mmap`, loads FMT records, then parses from `first_data_offset` to EOF. The simplest implementation and the baseline for comparisons.
 
 ```python
 from sequential_parser import SequentialParser
@@ -117,7 +119,7 @@ ArduPilot `.bin` files are a stream of binary messages. Every message starts wit
 FMT: type_id=130  length=52  name="GPS"  format="QBILLeeEefIBB"  labels="TimeUS,Status,GMS,..."
 ```
 
-`FormatManager` performs a single full-file scan to collect all `FMT` records, builds a registry of pre-compiled `struct.Struct` objects, and sets `data_start_offset` to the first non-FMT message. Parsers then decode from that offset with `unpack_from` (no slice allocation).
+`FormatManager` performs a single full-file scan to collect all `FMT` records, builds a registry of pre-compiled `struct.Struct` objects, and sets `first_data_offset` to the first non-FMT message. Parsers then decode from that offset with `unpack_from` (no slice allocation).
 
 ---
 

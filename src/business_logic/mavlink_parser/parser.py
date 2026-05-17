@@ -1,4 +1,6 @@
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -47,7 +49,7 @@ class MavlinkParser:
                     continue
                 row = msg.to_dict()
                 row["_msg_type"] = row.pop("mavpackettype", msg.get_type())
-                row["_timestamp"] = msg._timestamp
+                row["_timestamp"] = datetime.fromtimestamp(msg._timestamp, tz=ZoneInfo("Asia/Jerusalem")).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 messages.append(row)
 
             _log.info("parse(%r) -> %d messages", names, len(messages))

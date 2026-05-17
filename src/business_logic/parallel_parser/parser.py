@@ -9,7 +9,7 @@ _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from parallel_parser.workers import parse_chunk
+from parallel_parser.workers import _init_worker, parse_chunk
 from utils.shared._constants import MSG_HEADER
 from utils.shared.format_manager import FormatManager, Names
 from utils.shared.logger import get_logger
@@ -57,9 +57,9 @@ class ParallelParser:
 
             n_chunks = len(splits) - 1
             _log.debug("spawning %d workers across %d chunks", num_workers, n_chunks)
-            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            with ProcessPoolExecutor(max_workers=num_workers, initializer=_init_worker, initargs=(self._fmt,)) as executor:
                 futures = [
-                    executor.submit(parse_chunk, self._fmt.file_path, self._fmt, splits[i], splits[i + 1], target_ids, clock)
+                    executor.submit(parse_chunk, self._fmt.file_path, splits[i], splits[i + 1], target_ids, clock)
                     for i in range(n_chunks)
                 ]
                 chunks = [f.result() for f in futures]
@@ -72,6 +72,12 @@ class ParallelParser:
             raise
 
     def _compute_byte_range_splits(self, n_chunks: int, buffer: mmap.mmap) -> List[int]:
+        """Divide the file into n_chunks byte ranges, each starting on a message boundary.
+
+        Naive byte splits would land in the middle of a payload, so each split
+        point is nudged forward to the next valid message header.
+        Duplicate split points (e.g. near EOF) are removed via dict.fromkeys.
+        """
         file_size = len(buffer)
         chunk_size = file_size // n_chunks
 
@@ -84,6 +90,11 @@ class ParallelParser:
 
 
 def _find_message_start(buffer: mmap.mmap, offset: int, fmt: FormatManager) -> Optional[int]:
+    """Return the byte offset of the next valid message at or after *offset*.
+
+    Skips false-positive header matches (bytes 0xA3 0x95 that appear inside a
+    payload) by requiring that the type_id byte is a known FMT entry.
+    """
     scan_end = len(buffer)
     while offset + 3 <= scan_end:
         next_pos = buffer.find(MSG_HEADER, offset)

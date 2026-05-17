@@ -21,15 +21,24 @@ from utils.shared.timestamp_clock import TimestampClock
 
 _log = get_logger(__name__)
 
+_worker_fmt: Optional[FormatManager] = None
+
+
+def _init_worker(fmt: FormatManager) -> None:
+    """Store fmt once per worker process; avoids pickling it with every task."""
+    global _worker_fmt
+    _worker_fmt = fmt
+
 
 def parse_chunk(
     file_path: str,
-    fmt: FormatManager,
     start_offset: int,
     end_offset: Optional[int],
     target_ids: Optional[Set[int]],
     clock: Optional[TimestampClock] = None,
 ) -> List[Dict[str, Any]]:
+    """Open the file, parse the assigned byte range, and return decoded messages."""
+    fmt = _worker_fmt
     _log.debug("chunk [%d:%s] start", start_offset, end_offset)
     try:
         chunk_clock = clock.copy() if clock is not None else None

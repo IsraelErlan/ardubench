@@ -2,7 +2,9 @@
 
 import struct
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 _src_dir = str(Path(__file__).parent.parent.parent)
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
     from utils.shared.format_manager import FormatManager
 
 _log = get_logger(__name__)
+_TZ = ZoneInfo("Asia/Jerusalem")
 
 # Seconds between Unix epoch (1970-01-01) and GPS epoch (1980-01-06)
 _GPS_EPOCH: int = 86400 * (10 * 365 + int((1980 - 1969) / 4) + 1 + 6 - 2)
@@ -80,11 +83,12 @@ class TimestampClock:
         labels = entry["labels"]
         name = entry["name"]
 
-        if labels and labels[0] == "TimeUS":
+        if labels and labels[0] == "TimeUS" and "TimeUS" in msg:
             ts = self.timebase + msg["TimeUS"] * 0.000001
         elif (
             labels
             and labels[0] == "TimeMS"
+            and "TimeMS" in msg
             and not name.startswith("ACC")
             and not name.startswith("GYR")
             and self.timebase + msg["TimeMS"] * 0.001 >= self.timestamp
@@ -93,7 +97,10 @@ class TimestampClock:
         else:
             ts = self.timestamp
 
-        msg["_timestamp"] = ts
+        try:
+            msg["_timestamp"] = datetime.fromtimestamp(ts, tz=_TZ).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        except (OSError, OverflowError, ValueError):
+            msg["_timestamp"] = f"+{ts:.3f}s"
         self.timestamp = ts
 
     def advance_from_payload(self, payload: bytes, entry: Dict[str, Any]) -> None:
