@@ -36,8 +36,10 @@ class ThreadedParser:
 
     def parse(self, names: Names = None, n_threads: Optional[int] = None) -> List[Dict[str, Any]]:
         _log.debug("parse(names=%r)", names)
+        if n_threads is not None and n_threads < 1:
+            raise ValueError(f"n_threads must be >= 1, got {n_threads}")
         try:
-            num_threads = n_threads or self._n_threads
+            num_threads = n_threads if n_threads is not None else self._n_threads
 
             with open(self._fmt.file_path, "rb") as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:

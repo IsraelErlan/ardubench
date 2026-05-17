@@ -3,7 +3,6 @@ import os
 import sys
 
 _FORMATTER = logging.Formatter("%(levelname)-8s %(name)s: %(message)s")
-_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -16,5 +15,6 @@ def get_logger(name: str) -> logging.Logger:
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(_FORMATTER)
         logger.addHandler(handler)
-    logger.setLevel(_LOG_LEVEL)
+        logger.propagate = False
+    logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
     return logger

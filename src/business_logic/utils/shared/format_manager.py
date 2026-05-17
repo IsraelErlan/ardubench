@@ -72,6 +72,9 @@ class FormatManager:
 
     def load(self, buffer: mmap.mmap) -> None:
         """Scan FMT records from an already-open mmap buffer."""
+        self._registry.clear()
+        self._name_to_id.clear()
+        self.first_data_offset = 0
         try:
             offset, scan_end = 0, len(buffer)
             first_data_found = False

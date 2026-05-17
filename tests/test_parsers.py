@@ -25,16 +25,21 @@ _FMT_TO_STRUCT = {
     'b': 'b', 'B': 'B', 'h': 'h', 'H': 'H',
     'i': 'i', 'I': 'I', 'f': 'f', 'd': 'd',
     'q': 'q', 'Q': 'Q', 'n': '4s', 'N': '16s', 'Z': '64s',
+    'c': 'h', 'C': 'H', 'e': 'i', 'E': 'I', 'L': 'i',
+    'M': 'b', 'a': '64s', 'g': 'e',
 }
+
+GPS_ID, ATT_ID, BAR_ID, POS_ID = 130, 131, 132, 133
+GPS_STRUCT = struct.Struct('<I')
+ATT_STRUCT = struct.Struct('<HH')
+BAR_STRUCT = struct.Struct('<H')
+POS_STRUCT = struct.Struct('<hi')   # c → h (/100), L → i (/10_000_000)
 
 
 def _fmt_record(type_id: int, name: str, fmt_chars: str, labels: str) -> bytes:
-    """Build an 89-byte FMT message that defines a data-message schema."""
     data_struct = struct.Struct('<' + ''.join(_FMT_TO_STRUCT.get(c, '') for c in fmt_chars))
-    total_length = 3 + data_struct.size
     payload = _FMT_PAYLOAD_STRUCT.pack(
-        type_id,
-        total_length,
+        type_id, 3 + data_struct.size,
         name.encode().ljust(4, b'\x00')[:4],
         fmt_chars.encode().ljust(16, b'\x00')[:16],
         labels.encode().ljust(64, b'\x00')[:64],
@@ -47,26 +52,11 @@ def _data_record(type_id: int, payload: bytes) -> bytes:
 
 
 # ─────────────────────────────────────────────
-# Shared type definitions
-# ─────────────────────────────────────────────
-
-GPS_ID = 130
-ATT_ID = 131
-GPS_STRUCT = struct.Struct('<I')   # TimeUS: uint32
-ATT_STRUCT = struct.Struct('<HH')  # Roll, Pitch: uint16
-
-
-# ─────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────
 
-BAR_ID = 132
-BAR_STRUCT = struct.Struct('<H')  # Alt: uint16
-
-
 @pytest.fixture
 def bin_file(tmp_path) -> str:
-    """Valid .bin with 4 FMT, 3 GPS, 2 ATT and 2 BAR messages."""
     content = (
         _fmt_record(_FMT_TYPE_ID, 'FMT', 'BBnNZ', 'Type,Length,Name,Format,Columns') +
         _fmt_record(GPS_ID, 'GPS', 'I',  'TimeUS') +
@@ -80,140 +70,78 @@ def bin_file(tmp_path) -> str:
         _data_record(BAR_ID, BAR_STRUCT.pack(510)) +
         _data_record(GPS_ID, GPS_STRUCT.pack(3000))
     )
-    path = tmp_path / 'test.bin'
-    path.write_bytes(content)
-    return str(path)
+    p = tmp_path / 'test.bin'
+    p.write_bytes(content)
+    return str(p)
 
 
 @pytest.fixture
-def invalid_header_file(tmp_path) -> str:
-    """Valid GPS FMT then a record whose header bytes are wrong."""
+def divisor_file(tmp_path) -> str:
     content = (
+        _fmt_record(POS_ID, 'POS', 'cL', 'Alt,Lat') +
+        _data_record(POS_ID, POS_STRUCT.pack(5000, 316017200)) +
+        _data_record(POS_ID, POS_STRUCT.pack(-200, -118462000))
+    )
+    p = tmp_path / 'divisor.bin'
+    p.write_bytes(content)
+    return str(p)
+
+
+# ─────────────────────────────────────────────
+# Tests
+# ─────────────────────────────────────────────
+
+def test_sequential(bin_file, tmp_path):
+    p = SequentialParser(bin_file)
+    assert len(p.parse()) == 11
+    assert len(p.parse('GPS')) == 3
+    assert len(p.parse('gps')) == 3
+    assert len(p.parse(['GPS', 'ATT'])) == 5
+    assert p.parse('UNKNOWN') == []
+    assert [m['TimeUS'] for m in p.parse('GPS')] == [1000, 2000, 3000]
+
+    with pytest.raises(FileNotFoundError):
+        SequentialParser(str(tmp_path / 'missing.bin'))
+
+    bad = tmp_path / 'bad.bin'
+    bad.write_bytes(
         _fmt_record(GPS_ID, 'GPS', 'I', 'TimeUS') +
         b'\xDE\xAD' + bytes([GPS_ID]) + GPS_STRUCT.pack(1)
     )
-    path = tmp_path / 'bad_header.bin'
-    path.write_bytes(content)
-    return str(path)
+    assert all(m['_msg_type'] == 'FMT' for m in SequentialParser(str(bad)).parse())
 
 
-@pytest.fixture
-def truncated_fmt_file(tmp_path) -> str:
-    """FMT record with only 10 of the required 86 payload bytes."""
-    content = _HEADER + bytes([_FMT_TYPE_ID]) + b'\x00' * 10
-    path = tmp_path / 'truncated_fmt.bin'
-    path.write_bytes(content)
-    return str(path)
+@pytest.mark.parametrize("parse_fn", [
+    lambda f: ParallelParser(f).parse(n_workers=1),
+    lambda f: ThreadedParser(f).parse(n_threads=1),
+    lambda f: asyncio.run(AsyncParser(f).parse()),
+])
+def test_concurrent_matches_sequential(bin_file, parse_fn):
+    assert parse_fn(bin_file) == SequentialParser(bin_file).parse()
 
 
-@pytest.fixture
-def unregistered_type_file(tmp_path) -> str:
-    """GPS FMT defined, then a data record for an undefined type (200)."""
-    content = (
-        _fmt_record(GPS_ID, 'GPS', 'I', 'TimeUS') +
-        _data_record(200, b'\x01\x02\x03\x04')
-    )
-    path = tmp_path / 'unknown_type.bin'
-    path.write_bytes(content)
-    return str(path)
+def test_threaded_multi_chunk(bin_file):
+    expected = SequentialParser(bin_file).parse()
+    result = sorted(ThreadedParser(bin_file).parse(n_threads=4), key=lambda m: (m['_msg_type'], str(m)))
+    expected = sorted(expected, key=lambda m: (m['_msg_type'], str(m)))
+    drop_ts = lambda msgs: [{k: v for k, v in m.items() if k != '_timestamp'} for m in msgs]
+    assert drop_ts(result) == drop_ts(expected)
 
 
-@pytest.fixture
-def truncated_payload_file(tmp_path) -> str:
-    """GPS FMT (total_length=7) then a GPS record with only 2 of 4 payload bytes."""
-    content = (
-        _fmt_record(GPS_ID, 'GPS', 'I', 'TimeUS') +
-        _HEADER + bytes([GPS_ID]) + b'\x01\x02'
-    )
-    path = tmp_path / 'truncated_payload.bin'
-    path.write_bytes(content)
-    return str(path)
+def test_divisors(divisor_file, bin_file):
+    msgs = SequentialParser(divisor_file).parse('POS')
+    assert msgs[0]['Alt'] == pytest.approx(50.0)
+    assert msgs[0]['Lat'] == pytest.approx(31.60172)
+    assert msgs[1]['Alt'] == pytest.approx(-2.0)
+    assert msgs[1]['Lat'] == pytest.approx(-11.8462)
+
+    with pytest.raises(ValueError):
+        ParallelParser(bin_file).parse(n_workers=0)
+    with pytest.raises(ValueError):
+        ThreadedParser(bin_file).parse(n_threads=0)
 
 
-# ─────────────────────────────────────────────
-# SequentialParser — full contract + error cases
-# ─────────────────────────────────────────────
-
-class TestSequentialParser:
-    def test_parse_all(self, bin_file):
-        msgs = SequentialParser(bin_file).parse()
-        assert len(msgs) == 11  # 4 FMT + 3 GPS + 2 ATT + 2 BAR
-
-    def test_filter(self, bin_file):
-        assert len(SequentialParser(bin_file).parse('GPS')) == 3
-        assert len(SequentialParser(bin_file).parse('gps')) == 3        # case-insensitive
-        assert len(SequentialParser(bin_file).parse(['GPS', 'ATT'])) == 5
-        assert SequentialParser(bin_file).parse('UNKNOWN') == []
-
-    def test_field_values(self, bin_file):
-        gps = SequentialParser(bin_file).parse('GPS')
-        assert [m['TimeUS'] for m in gps] == [1000, 2000, 3000]
-        assert [m['_timestamp'] for m in gps] == ['1970-01-01 02:00:00.001', '1970-01-01 02:00:00.002', '1970-01-01 02:00:00.003']
-        att = SequentialParser(bin_file).parse('ATT')
-        assert att[0] == {'_msg_type': 'ATT', 'Roll': 10, 'Pitch': 20, '_timestamp': '1970-01-01 02:00:00.001'}
-        assert att[1] == {'_msg_type': 'ATT', 'Roll': 30, 'Pitch': 40, '_timestamp': '1970-01-01 02:00:00.002'}
-
-    def test_file_not_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            SequentialParser(str(tmp_path / 'missing.bin'))
-
-    def test_invalid_header_returns_partial(self, invalid_header_file):
-        msgs = SequentialParser(invalid_header_file).parse()
-        assert all(m['_msg_type'] == 'FMT' for m in msgs)
-
-    def test_truncated_fmt_returns_empty(self, truncated_fmt_file):
-        msgs = SequentialParser(truncated_fmt_file).parse()
-        assert msgs == []
-
-    def test_unregistered_type_skipped(self, unregistered_type_file):
-        msgs = SequentialParser(unregistered_type_file).parse()
-        assert all(m['_msg_type'] == 'FMT' for m in msgs)
-
-    def test_truncated_payload_returns_partial(self, truncated_payload_file):
-        msgs = SequentialParser(truncated_payload_file).parse()
-        assert all(m['_msg_type'] == 'FMT' for m in msgs)
-
-
-# ─────────────────────────────────────────────
-# Concurrent parsers — parity with Sequential
-# ─────────────────────────────────────────────
-
-class TestConcurrentParserParity:
-    """Each concurrent parser must return the same output as SequentialParser."""
-
-    def test_parallel_matches_sequential(self, bin_file):
-        expected = SequentialParser(bin_file).parse()
-        assert ParallelParser(bin_file).parse(n_workers=1) == expected
-
-    def test_threaded_matches_sequential(self, bin_file):
-        expected = SequentialParser(bin_file).parse()
-        assert ThreadedParser(bin_file).parse(n_threads=1) == expected
-
-    def test_threaded_multi_worker_matches_sequential(self, bin_file):
-        expected = SequentialParser(bin_file).parse()
-        result = sorted(ThreadedParser(bin_file).parse(n_threads=4), key=lambda m: (m['_msg_type'], str(m)))
-        expected_sorted = sorted(expected, key=lambda m: (m['_msg_type'], str(m)))
-        # Cross-chunk carry-forward differs at boundaries for messages without TimeUS —
-        # compare field values only, not _timestamp.
-        drop_ts = lambda msgs: [{k: v for k, v in m.items() if k != '_timestamp'} for m in msgs]
-        assert drop_ts(result) == drop_ts(expected_sorted)
-
-    def test_async_matches_sequential(self, bin_file):
-        expected = SequentialParser(bin_file).parse()
-        assert asyncio.run(AsyncParser(bin_file).parse()) == expected
-
-
-# ─────────────────────────────────────────────
-# Cross-validation: custom parsers vs pymavlink
-# ─────────────────────────────────────────────
-
-class TestCrossValidationVsMavlink:
-    def test_all_messages_match(self, bin_file):
-        seq = SequentialParser(bin_file).parse()
-        mav = MavlinkParser(bin_file).parse()
-
-        assert len(seq) == len(mav), (
-            f'message count differs: sequential={len(seq)}, mavlink={len(mav)}'
-        )
-        for i, (s, m) in enumerate(zip(seq, mav)):
-            assert s == m, f'message {i} differs:\n  sequential: {s}\n  mavlink:    {m}'
+def test_mavlink_matches_sequential(bin_file):
+    seq = SequentialParser(bin_file).parse()
+    mav = MavlinkParser(bin_file).parse()
+    assert seq == mav

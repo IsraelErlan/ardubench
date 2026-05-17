@@ -39,8 +39,10 @@ class ParallelParser:
 
     def parse(self, names: Names = None, n_workers: Optional[int] = None) -> List[Dict[str, Any]]:
         _log.debug("parse(names=%r)", names)
+        if n_workers is not None and n_workers < 1:
+            raise ValueError(f"n_workers must be >= 1, got {n_workers}")
         try:
-            num_workers = n_workers or os.process_cpu_count() or os.cpu_count() or 4
+            num_workers = n_workers if n_workers is not None else (getattr(os, "process_cpu_count", lambda: None)() or os.cpu_count() or 4)
 
             with open(self._fmt.file_path, "rb") as file:
                 with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as buffer:

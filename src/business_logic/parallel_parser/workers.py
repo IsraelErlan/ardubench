@@ -38,6 +38,8 @@ def parse_chunk(
     clock: Optional[TimestampClock] = None,
 ) -> List[Dict[str, Any]]:
     """Open the file, parse the assigned byte range, and return decoded messages."""
+    if _worker_fmt is None:
+        raise RuntimeError("Worker not initialized — _init_worker must be called via initializer=")
     fmt = _worker_fmt
     _log.debug("chunk [%d:%s] start", start_offset, end_offset)
     try:

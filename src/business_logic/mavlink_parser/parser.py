@@ -59,9 +59,9 @@ class MavlinkParser:
             raise
 
 
-def _resolve_type_filter(names: Names) -> Optional[List[str]]:
+def _resolve_type_filter(names: Names) -> Optional[frozenset]:
     if names is None:
         return None
     if isinstance(names, str):
-        return [names.upper()]
-    return [n.upper() for n in names]
+        return frozenset({names.upper()})
+    return frozenset(n.upper() for n in names)
